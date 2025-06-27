@@ -9,14 +9,13 @@ use syn::{
 
 pub fn schema_macro(schema: &Schema) -> Result<TokenStream2> {
     let Schema { parts } = schema;
-    let mut migrations = parts.iter().flat_map(migrations).collect::<Vec<_>>();
-    let migrations = migrations.as_slice();
+    let migrations = parts.iter().flat_map(migrations).collect::<Vec<_>>();
     let db = Sqlite::open(":memory:").unwrap();
     db.migrate(&migrations).unwrap();
     let tokens = parts
         .into_iter()
         .filter_map(|part| match part {
-            SchemaType::Table(table) => Some(table.clone()),
+            SchemaType::Table(table) => Some(table),
             SchemaType::Index(_index) => None,
         })
         .map(|table| {
@@ -259,7 +258,7 @@ enum SchemaType {
 }
 
 pub struct Schema {
-    pub parts: Vec<SchemaType>,
+    parts: Vec<SchemaType>,
 }
 
 pub struct Table {
