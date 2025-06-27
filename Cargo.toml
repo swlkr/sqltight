@@ -1,0 +1,11 @@
+[package]
+name = "sqltight"
+version = "0.1.0"
+edition = "2024"
+resolver = "2"
+
+[dependencies]
+sqltight_ffi = { path = "sqltight_ffi" }
+sqltight_macros = { path = "sqltight_macros" }
+sqltight_core = { path = "sqltight_core" }
+

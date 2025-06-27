@@ -1,0 +1,7 @@
+[package]
+name = "sqltight_core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sqltight_ffi = { path = "../sqltight_ffi" }
