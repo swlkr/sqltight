@@ -1,6 +1,5 @@
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{ToTokens, quote};
-use sqltight_core::Sqlite;
 use syn::{
     Result, Token, braced,
     parse::{Parse, ParseStream},
@@ -10,8 +9,6 @@ use syn::{
 pub fn schema_macro(schema: &Schema) -> Result<TokenStream2> {
     let Schema { parts } = schema;
     let migrations = parts.iter().flat_map(migrations).collect::<Vec<_>>();
-    let db = Sqlite::open(":memory:").unwrap();
-    db.migrate(&migrations).unwrap();
     let tokens = parts
         .into_iter()
         .filter_map(|part| match part {
