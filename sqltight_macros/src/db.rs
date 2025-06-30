@@ -23,29 +23,13 @@ pub fn db_macro(database: &Database) -> Result<TokenStream2> {
         })
         .collect::<Vec<_>>();
     let table_tokens = tables.iter().map(|table| table_tokens(table));
-    let mut schema: Schema = std::collections::HashMap::new();
-    for table in &tables {
-        let columns = get_columns(&table);
-        match schema.get_mut(&table.name) {
-            Some(x) => {
-                x.extend(columns);
-            }
-            None => {
-                let mut x = std::collections::HashMap::new();
-                for column in columns {
-                    x.insert(column.0, column.1);
-                }
-                let _result = schema.insert(&table.name, x);
-            }
-        };
-    }
     let select_tokens = parts
         .into_iter()
         .filter_map(|part| match part {
             SchemaType::Select(select) => Some(select),
             _ => None,
         })
-        .map(|select| select_statement(&db, &schema, select))
+        .map(|select| select_statement(&db, select))
         .collect::<Result<Vec<_>>>()?;
     let tokens = quote! {
         #(#table_tokens)*
@@ -77,14 +61,6 @@ pub fn db_macro(database: &Database) -> Result<TokenStream2> {
         }
     };
     Ok(tokens)
-}
-
-fn get_columns(table: &Table) -> Vec<(String, Ident)> {
-    table
-        .fields
-        .iter()
-        .map(|field| (field.name.to_string(), field.ty.clone()))
-        .collect()
 }
 
 fn table_tokens(table: &Table) -> TokenStream2 {
@@ -235,11 +211,7 @@ fn index_migrations(index: &Index) -> Vec<String> {
         .collect()
 }
 
-fn select_statement(
-    db: &sqltight_core::Sqlite,
-    schema: &Schema,
-    select: &Select,
-) -> Result<TokenStream2> {
+fn select_statement(db: &sqltight_core::Sqlite, select: &Select) -> Result<TokenStream2> {
     let Select {
         fn_name,
         return_ty,
@@ -271,15 +243,12 @@ fn select_statement(
         .iter()
         .map(|name| Ident::new(name, fn_name.span()))
         .collect::<Vec<_>>();
-    let args = param_idents.iter().filter_map(|name| {
-        let key = name.to_string();
-        let key = key.trim_end_matches("_1");
-        let ty = schema.get(&table_name)?.get(&key.to_string())?;
-        Some(quote! { #name: #ty })
-    });
+    let args = param_idents
+        .iter()
+        .filter_map(|name| Some(quote! { #name: impl Into<sqltight::Value> }));
     let params = param_idents
         .iter()
-        .map(|arg| quote! { Value::from(#arg) })
+        .map(|arg| quote! { #arg.into() })
         .collect::<Vec<_>>();
     let params = match params.is_empty() {
         true => quote! { &[] },
@@ -433,5 +402,3 @@ fn is_vec(ty: &syn::TypePath) -> bool {
         _ => false,
     }
 }
-
-type Schema<'a> = std::collections::HashMap<&'a Ident, std::collections::HashMap<String, Ident>>;
