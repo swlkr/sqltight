@@ -233,7 +233,7 @@ fn select_statement(db: &sqltight_core::Sqlite, select: &Select) -> Result<Token
     );
     let param_names = db
         .prepare(&sql, &[])
-        .expect("failed to prepare sql")
+        .map_err(|e| syn::Error::new(fn_name.span(), format!("{:?}", e)))?
         .parameter_names();
     let param_names = param_names
         .iter()
