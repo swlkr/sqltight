@@ -1,6 +1,7 @@
 use sqltight_ffi::{
     SQLITE_DONE, SQLITE_OK, SQLITE_ROW, sqlite3, sqlite3_bind_blob, sqlite3_bind_double,
-    sqlite3_bind_int64, sqlite3_bind_null, sqlite3_bind_text, sqlite3_changes, sqlite3_close,
+    sqlite3_bind_int64, sqlite3_bind_null, sqlite3_bind_parameter_count,
+    sqlite3_bind_parameter_name, sqlite3_bind_text, sqlite3_changes, sqlite3_close,
     sqlite3_column_bytes, sqlite3_column_count, sqlite3_column_double, sqlite3_column_int64,
     sqlite3_column_name, sqlite3_column_text, sqlite3_column_type, sqlite3_errmsg,
     sqlite3_finalize, sqlite3_open, sqlite3_prepare_v2, sqlite3_step, sqlite3_stmt,
@@ -250,6 +251,17 @@ impl Stmt {
         self.finalize()?;
         let changes = unsafe { sqlite3_changes(self.db) };
         Ok(changes)
+    }
+
+    pub fn parameter_names(&self) -> Vec<String> {
+        let mut names = vec![];
+        let parameter_count = unsafe { sqlite3_bind_parameter_count(self.stmt) };
+        for i in 1..=parameter_count {
+            let name = unsafe { CStr::from_ptr(sqlite3_bind_parameter_name(self.stmt, i)) };
+            let name = name.to_string_lossy().to_string();
+            names.push(name);
+        }
+        names
     }
 }
 
