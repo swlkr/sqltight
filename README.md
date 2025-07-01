@@ -7,10 +7,15 @@ Yet another sqlite library for rust
 ```rust
 use sqltight::{db, Result};
 
-schema! {
+// schema is additive only, no drops
+// create table is done with a required "id integer primary key" column
+// after that it is only alter table, no migrations necessary
+// all columns do not have defaults and are optional except the id, updated_at and created_at columns
+db! {
   table User {
     id: Int,
-    email: Text
+    email: Text,
+    created_at: Int
   }
 
   index User {
@@ -20,21 +25,50 @@ schema! {
   table Post {
     id: Int,
     user_id: Int,
-    content: Text
+    content: Text,
+    created_at: Int
+  }
+
+  // select statements are named and the return
+  // type determines the columns selected
+  select posts Vec<Post> {
+    "where Post.user_id = :user_id
+     order by created_at desc
+     limit 2"
+  }
+
+  select user User {
+    "where User.id = :user_id"
   }
 }
 
 fn main() -> Result<()> {
-  let (users, posts) = schema();
-  let user = save!(User { email: "email".into() })?;
-  let mut user1 = save!(User { email: "email2".into() })?;
-  user1.email = "email3".into();
-  let user1 = user1.save()?;
-  let user1 = user1.delete()?;
-  let post = save!(Post { content: "content".into() })?;
-  let post1 = save!(Post { content: "content1".into() })?;
-  let post_rows = posts.select_where(posts.user_id, is, user.id).rows()?;
-  let user = users.select_where(users.id, is, user.id).rows()?;
+  let db = db();
+
+  // upsert and delete are the only write functions
+  let user = User { email: text("email"), ..Default::default() };
+  let user = db.save(user)?;
+
+  let user1 = User { email: text("email2"), ..Default::default() };
+  let mut user1 = db.save(user1)?;
+  // sqlite types are explicit there is no implicit mapping between them
+  user1.email = text("email3");
+  let user1 = db.save(user1)?;
+  let user1 = db.delete(user1)?;
+
+  let post = Post { content: text("content"), user_id: user.id, ..Default::default() };
+  let post1 = Post { content: text("content1"), user_id: user.id, ..Default::default() };
+  {
+    let tx = db.transaction()?;
+    let post = tx.save(post)?;
+    let post1 = tx.save(post1)?;
+  }
+
+  // queries are defined and prepared into statements
+  // ahead of time in the db! macro
+  let posts = db.posts(user.id)?;
+  let user = db.user(user.id)?;
+
   Ok(())
 }
 ```

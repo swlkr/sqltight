@@ -35,12 +35,6 @@ pub fn db_macro(database: &Database) -> Result<TokenStream2> {
         #(#table_tokens)*
         impl Database {
             #(#select_tokens)*
-            pub fn save<T: sqltight::Crud>(&self, row: T) -> Result<T> {
-                row.save(&self)
-            }
-            pub fn delete<T: sqltight::Crud>(&self, row: T) -> Result<T> {
-                row.delete(&self)
-            }
         }
         pub fn db() -> sqltight::Result<Database> {
             #[cfg(test)]
@@ -102,11 +96,10 @@ fn table_tokens(table: &Table) -> TokenStream2 {
             #(#field_tokens,)*
         }
         impl sqltight::Crud for #name {
-            fn save(self, db: &sqltight::Database) -> sqltight::Result<Self> {
+            fn save(self, db: &sqltight::Sqlite) -> sqltight::Result<Self> {
                 let sql = #upsert_sql;
                 let params = vec![#(#upsert_params),*];
                 let row = db
-                    .0
                     .prepare(&sql, &params)?
                     .rows()?
                     .into_iter()
@@ -114,11 +107,10 @@ fn table_tokens(table: &Table) -> TokenStream2 {
                     .ok_or(sqltight::Error::RowNotFound)?;
                 Ok(Self::from_row(&row))
             }
-            fn delete(self, db: &sqltight::Database) -> sqltight::Result<Self> {
+            fn delete(self, db: &sqltight::Sqlite) -> sqltight::Result<Self> {
                 let sql = #delete_sql;
                 let params = vec![sqltight::Value::Integer(self.id)];
                 let row = db
-                    .0
                     .prepare(&sql, &params)?
                     .rows()?
                     .into_iter()

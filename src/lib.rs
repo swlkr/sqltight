@@ -1,5 +1,5 @@
 extern crate self as sqltight;
-pub use sqltight_core::{Error, Result, Sqlite, Stmt, Transaction, Tx, Value};
+pub use sqltight_core::{Error, Result, Sqlite, Stmt, Tx, Value};
 pub use sqltight_macros::db;
 use std::collections::BTreeMap;
 
@@ -35,16 +35,48 @@ pub trait FromRow {
 }
 
 pub trait Crud {
-    fn save(self, db: &Database) -> sqltight::Result<Self>
+    fn save(self, db: &Sqlite) -> sqltight::Result<Self>
     where
         Self: Sized;
-    fn delete(self, db: &Database) -> sqltight::Result<Self>
+
+    fn delete(self, db: &Sqlite) -> sqltight::Result<Self>
     where
         Self: Sized;
 }
 
 #[allow(unused)]
 pub struct Database(sqltight::Sqlite);
+
+impl Database {
+    pub fn transaction<'a>(&'a self) -> Result<Transaction<'a>> {
+        let tx = self.0.transaction()?;
+        Ok(Transaction(tx))
+    }
+
+    pub fn execute(&self, sql: &str) -> Result<i32> {
+        self.0.execute(sql)
+    }
+
+    pub fn save<T: sqltight::Crud>(&self, row: T) -> Result<T> {
+        row.save(&self.0)
+    }
+
+    pub fn delete<T: sqltight::Crud>(&self, row: T) -> Result<T> {
+        row.delete(&self.0)
+    }
+}
+
+pub struct Transaction<'a>(sqltight_core::Transaction<'a>);
+
+impl<'a> Transaction<'a> {
+    pub fn save<T: sqltight::Crud>(&self, row: T) -> Result<T> {
+        row.save(&self.0)
+    }
+
+    pub fn delete<T: sqltight::Crud>(&self, row: T) -> Result<T> {
+        row.delete(&self.0)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -58,6 +90,10 @@ mod tests {
             updated_at: Int,
         }
 
+        index User {
+            email: Unique
+        }
+
         table Post {
             id: Int,
             user_id: Int,
@@ -66,19 +102,14 @@ mod tests {
             updated_at: Int,
         }
 
-        index User {
-            email: Unique
-        }
-
-        select get_posts Vec<Post> {
+        select posts Vec<Post> {
             "where Post.user_id = :user_id
             order by Post.created_at
             limit 2"
         }
 
-        select get_user User {
-            "where User.id = :id
-             limit 1"
+        select user User {
+            "where User.id = :id"
         }
 
         select get_posts_by_contents Vec<Post> {
@@ -114,12 +145,57 @@ mod tests {
         })?;
         assert_eq!(post2.id, int(2));
         assert_eq!(post2.user_id, int(1));
-        let posts = db.get_posts(user.id)?;
-        let user = db.get_user(user.id)?;
+        let posts = db.posts(user.id)?;
+        let user = db.user(user.id)?;
         assert_eq!(posts.len(), 2);
         assert_eq!(user.id, int(1));
         let posts = db.get_posts_by_contents(text("content"), text("content 2"))?;
         assert_eq!(posts.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn readme() -> sqltight::Result<()> {
+        let db = db()?;
+
+        let user = User {
+            email: text("email"),
+            ..Default::default()
+        };
+        let user = db.save(user)?;
+
+        let user1 = User {
+            email: text("email2"),
+            ..Default::default()
+        };
+        let mut user1 = db.save(user1)?;
+        // sqlite types are explicit there is no implicit mapping between them
+        user1.email = text("email3");
+        let user1 = db.save(user1)?;
+        let _user1 = db.delete(user1)?;
+
+        let post = Post {
+            content: text("content"),
+            user_id: user.id,
+            ..Default::default()
+        };
+        let post1 = Post {
+            content: text("content1"),
+            user_id: user.id,
+            ..Default::default()
+        };
+        {
+            let tx = db.transaction()?;
+            let _post = tx.save(post)?;
+            let _post1 = tx.save(post1)?;
+        }
+
+        // queries are defined and prepared into statements
+        // ahead of time in the db! macro
+        let posts = db.posts(user.id)?;
+        let found_user = db.user(user.id)?;
+        assert_eq!(posts.len(), 2);
+        assert_eq!(found_user.id, user.id);
         Ok(())
     }
 }

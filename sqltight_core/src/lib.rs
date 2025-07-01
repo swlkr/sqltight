@@ -3,7 +3,7 @@ use sqltight_ffi::{
     sqlite3_bind_int64, sqlite3_bind_null, sqlite3_bind_parameter_count,
     sqlite3_bind_parameter_name, sqlite3_bind_text, sqlite3_changes, sqlite3_close,
     sqlite3_column_bytes, sqlite3_column_count, sqlite3_column_double, sqlite3_column_int64,
-    sqlite3_column_name, sqlite3_column_text, sqlite3_column_type, sqlite3_errmsg,
+    sqlite3_column_name, sqlite3_column_text, sqlite3_column_type, sqlite3_errmsg, sqlite3_exec,
     sqlite3_finalize, sqlite3_open, sqlite3_prepare_v2, sqlite3_step, sqlite3_stmt,
 };
 
@@ -66,8 +66,20 @@ impl Sqlite {
     }
 
     pub fn execute(&self, sql: &str) -> Result<i32> {
-        let result = self.prepare(sql, &[])?.result()?;
-        Ok(result)
+        let c_sql = CString::new(sql)?;
+        let result = unsafe {
+            sqlite3_exec(
+                self.db,
+                c_sql.as_ptr(),
+                None,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+        };
+        match result {
+            SQLITE_OK => Ok(0),
+            code => Err(sqlite_err(code, self.db)),
+        }
     }
 
     pub fn transaction(&self) -> Result<Transaction> {
@@ -278,33 +290,23 @@ pub enum Tx {
     Exclusive,
 }
 
-impl std::fmt::Display for Tx {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Tx::Deferred => "deferred",
-            Tx::Immediate => "immediate",
-            Tx::Exclusive => "exclusive",
-        })
-    }
-}
-
 impl<'a> Transaction<'a> {
     pub fn new(sqlite: &'a Sqlite, tx: Tx) -> Result<Transaction<'a>> {
-        let sql = format!("begin {} transaction", tx);
-        let _stmt = sqlite.prepare(&sql, &[])?.result()?;
+        let sql = match tx {
+            Tx::Deferred => "begin deferred transaction",
+            Tx::Immediate => "begin immediate transaction",
+            Tx::Exclusive => "begin exclusive transaction",
+        };
+        let _stmt = sqlite.execute(&sql)?;
         Ok(Self { sqlite })
     }
 
-    pub fn end(&self) -> Result<()> {
-        let sql = format!("end transaction",);
-        let _stmt = self.prepare(&sql, &[])?.result()?;
-        Ok(())
+    pub fn end(&self) -> Result<i32> {
+        self.execute("end transaction")
     }
 
-    pub fn rollback(&self) -> Result<()> {
-        let sql = format!("rollback transaction",);
-        let _stmt = self.prepare(&sql, &[])?.result()?;
-        Ok(())
+    pub fn rollback(&self) -> Result<i32> {
+        self.execute("rollback transaction")
     }
 }
 
@@ -319,8 +321,13 @@ impl<'a> Deref for Transaction<'a> {
 impl<'a> Drop for Transaction<'a> {
     fn drop(&mut self) {
         match self.end() {
-            Ok(_) => {}
-            Err(_) => self.rollback().expect("Rollback failed"),
+            Ok(result) => {
+                dbg!(result);
+            }
+            Err(err) => {
+                dbg!(err);
+                self.rollback().expect("Rollback failed");
+            }
         }
     }
 }
