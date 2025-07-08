@@ -30,7 +30,7 @@ mod tests {
         select posts (
             Vec<Post>
             "where Post.user_id = :user_id
-            order by Post.created_at
+            order by created_at
             limit 2"
         )
 

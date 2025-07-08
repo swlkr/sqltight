@@ -1,6 +1,6 @@
 # sqltight
 
-Yet another sqlite library for rust
+Zero dependency sqlite library for rust
 
 # Quickstart
 

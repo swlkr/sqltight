@@ -1,5 +1,7 @@
-use proc_macro::{Delimiter, Ident, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Ident, Span, TokenStream, TokenTree};
 use std::iter::Peekable;
+
+use crate::Error;
 
 #[derive(Debug, Clone)]
 pub struct Field {
@@ -49,41 +51,50 @@ impl Parser<proc_macro::token_stream::IntoIter> {
         }
     }
 
-    fn expect_ident(&mut self) -> Result<Ident, String> {
+    fn expect_ident(&mut self) -> Result<Ident, Error> {
         match self.tokens.next() {
             Some(TokenTree::Ident(ident)) => Ok(ident),
-            Some(other) => Err(format!("Expected an identifier, but got: {}", other)),
-            None => Err("Expected an identifier, but found end of stream.".to_string()),
+            Some(other) => Err(Error::Parse {
+                text: format!("Expected an identifier, but got: {}", other),
+                span: other.span(),
+            }),
+            None => Err(Error::Parse {
+                text: "Expected an identifier, but found end of stream.".to_string(),
+                span: Span::call_site(),
+            }),
         }
     }
 
-    fn expect_punct(&mut self, expected: char) -> Result<(), String> {
+    fn expect_punct(&mut self, expected: char) -> Result<(), Error> {
         match self.tokens.next() {
             Some(TokenTree::Punct(punct)) if punct.as_char() == expected => Ok(()),
-            Some(other) => Err(format!(
-                "Expected punctuation '{}', but got: {}",
-                expected, other
-            )),
-            None => Err(format!(
-                "Expected punctuation '{}', but found end of stream.",
-                expected
-            )),
+            Some(other) => Err(Error::Parse {
+                text: format!("Expected punctuation '{}', but got: {}", expected, other),
+                span: other.span(),
+            }),
+            None => Err(Error::Parse {
+                text: format!(
+                    "Expected punctuation '{}', but found end of stream.",
+                    expected
+                ),
+                span: Span::call_site(),
+            }),
         }
     }
 
-    fn parse_table(&mut self) -> Result<Table, String> {
+    fn parse_table(&mut self) -> Result<Table, Error> {
         let name = self.expect_ident()?;
         let fields = self.parse_braced_fields()?;
         Ok(Table { name, fields })
     }
 
-    fn parse_index(&mut self) -> Result<Index, String> {
+    fn parse_index(&mut self) -> Result<Index, Error> {
         let name = self.expect_ident()?;
         let fields = self.parse_braced_fields()?;
         Ok(Index { name, fields })
     }
 
-    fn parse_select(&mut self) -> Result<Select, String> {
+    fn parse_select(&mut self) -> Result<Select, Error> {
         let fn_name = self.expect_ident()?;
 
         match self.tokens.next() {
@@ -96,26 +107,31 @@ impl Parser<proc_macro::token_stream::IntoIter> {
                          let sql = lit.to_string().trim_matches('"').to_string();
                          Ok(Select { fn_name, return_ty, sql })
                      },
-                     _ => Err("Expected a string literal for the SQL query inside the select parentheses.".to_string())
+                     _ => Err(Error::Parse { text: "Expected a string literal for the SQL query inside the select parentheses.".to_string(), span: fn_name.span()})
                  }
             }
-            _ => {
-                Err("Expected a parenthesized group `(...)` for the select statement.".to_string())
-            }
+            _ => Err(Error::Parse {
+                text: "Expected a parenthesized group `(...)` for the select statement."
+                    .to_string(),
+                span: fn_name.span(),
+            }),
         }
     }
 
-    fn parse_braced_fields(&mut self) -> Result<Vec<Field>, String> {
+    fn parse_braced_fields(&mut self) -> Result<Vec<Field>, Error> {
         match self.tokens.next() {
             Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Brace => {
                 let mut content_parser = Parser::new(group.stream());
                 content_parser.parse_fields()
             }
-            _ => Err("Expected a braced block `{ ... }`".to_string()),
+            _other => Err(Error::Parse {
+                text: "Expected a braced block `{ ... }`".to_string(),
+                span: Span::call_site(),
+            }),
         }
     }
 
-    fn parse_fields(&mut self) -> Result<Vec<Field>, String> {
+    fn parse_fields(&mut self) -> Result<Vec<Field>, Error> {
         let mut fields = Vec::new();
         while self.tokens.peek().is_some() {
             let name = self.expect_ident()?;
@@ -136,13 +152,16 @@ impl Parser<proc_macro::token_stream::IntoIter> {
         Ok(fields)
     }
 
-    fn parse_return_ty(&mut self) -> Result<ReturnTy, String> {
+    fn parse_return_ty(&mut self) -> Result<ReturnTy, Error> {
         if let Some(TokenTree::Ident(ident)) = self.tokens.next() {
             if ident.to_string() != "Vec" {
                 return Ok(ReturnTy::Ident(ident));
             }
         } else {
-            return Err("Expected Vec<T> or T".into());
+            return Err(Error::Parse {
+                text: "Expected Vec<T> or T".into(),
+                span: Span::call_site(),
+            });
         };
 
         if let Some(TokenTree::Punct(punct)) = self.tokens.peek() {
@@ -150,13 +169,19 @@ impl Parser<proc_macro::token_stream::IntoIter> {
                 self.tokens.next();
             }
         } else {
-            return Err("Expected Vec<T>".into());
+            return Err(Error::Parse {
+                text: "Expected Vec<T>".into(),
+                span: Span::call_site(),
+            });
         };
 
         let return_ty = if let Some(TokenTree::Ident(ident)) = self.tokens.next() {
             ReturnTy::Vec(ident.clone())
         } else {
-            return Err("Expected Vec<T>".into());
+            return Err(Error::Parse {
+                text: "Expected Vec<T>".into(),
+                span: Span::call_site(),
+            });
         };
 
         self.tokens.next(); // get that last >
@@ -165,7 +190,7 @@ impl Parser<proc_macro::token_stream::IntoIter> {
     }
 }
 
-pub fn parse(input: TokenStream) -> Result<DatabaseSchema, String> {
+pub fn parse(input: TokenStream) -> Result<DatabaseSchema, Error> {
     let mut parser = Parser::new(input);
     let mut parts = Vec::new();
     while parser.tokens.peek().is_some() {
@@ -175,10 +200,13 @@ pub fn parse(input: TokenStream) -> Result<DatabaseSchema, String> {
             "index" => parts.push(SchemaPart::Index(parser.parse_index()?)),
             "select" => parts.push(SchemaPart::Select(parser.parse_select()?)),
             _ => {
-                return Err(format!(
-                    "Unexpected keyword: {}. Expected 'table', 'index', or 'select'.",
-                    keyword
-                ));
+                return Err(Error::Parse {
+                    text: format!(
+                        "Unexpected keyword: {}. Expected 'table', 'index', or 'select'.",
+                        keyword
+                    ),
+                    span: keyword.span(),
+                });
             }
         }
     }

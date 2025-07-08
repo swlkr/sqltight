@@ -1,11 +1,11 @@
-#![feature(proc_macro_quote, proc_macro_totokens)]
+#![feature(proc_macro_quote, proc_macro_totokens, proc_macro_diagnostic)]
 
 mod generator;
 mod parser;
 
 use generator::generate;
 use parser::parse;
-use proc_macro::{TokenStream, quote};
+use proc_macro::{Span, TokenStream, quote};
 
 #[proc_macro]
 pub fn db(input: TokenStream) -> TokenStream {
@@ -17,22 +17,26 @@ pub fn db(input: TokenStream) -> TokenStream {
 
 fn db_macro(input: TokenStream) -> Result<TokenStream, Error> {
     let schema = parse(input)?;
-    let tokens = generate(&schema);
+    let tokens = generate(&schema)?;
     Ok(tokens)
 }
 
-#[derive(Debug)]
 enum Error {
-    String(String),
+    Generate { text: String, span: Span },
+    Parse { text: String, span: Span },
 }
 
-impl From<String> for Error {
-    fn from(value: String) -> Self {
-        Self::String(value)
+impl Error {
+    pub fn msg(&self) -> &str {
+        match self {
+            Error::Generate { text, .. } => text,
+            Error::Parse { text, .. } => text,
+        }
     }
 }
 
-fn to_compile_error(error: Error) -> TokenStream {
-    let err = format!("{:?}", error);
-    quote!(compile_error!($err))
+fn to_compile_error(err: Error) -> TokenStream {
+    quote! {
+        compile_error!("Failed to build macro")
+    }
 }

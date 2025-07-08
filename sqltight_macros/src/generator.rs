@@ -1,28 +1,24 @@
-use crate::parser::{DatabaseSchema, Field, Index, ReturnTy, SchemaPart, Select, Table};
-use proc_macro::{Ident, TokenStream, quote};
+use crate::{
+    Error,
+    parser::{DatabaseSchema, Field, Index, ReturnTy, SchemaPart, Select, Table},
+};
+use proc_macro::{Diagnostic, Ident, Level, Span, TokenStream, quote};
 
-pub fn generate(schema: &DatabaseSchema) -> TokenStream {
+pub fn generate(schema: &DatabaseSchema) -> Result<TokenStream, Error> {
     let db = sqltight_core::Sqlite::open(":memory:").unwrap();
     let migrations = schema.parts.iter().flat_map(migration).collect::<Vec<_>>();
-    match db.migrate(&migrations) {
-        Ok(_) => {}
-        Err(_) => todo!(),
-    };
+    let _result = db.migrate(&migrations)?;
     let tokens = schema
         .parts
         .iter()
         .map(|part| generate_part(&db, part))
-        .collect::<Result<TokenStream, Error>>();
-    let tokens = match tokens {
-        Ok(tokens) => tokens,
-        Err(_) => todo!(),
-    };
+        .collect::<Result<TokenStream, Error>>()?;
     let migration_tokens = migrations
         .iter()
         .map(|mig| quote! { $mig, })
         .collect::<TokenStream>();
 
-    quote! {
+    Ok(quote! {
         impl sqltight::Opener for sqltight::Database {
             fn open(path: &str) -> sqltight::Result<sqltight::Database> {
                 let conn = sqltight::Sqlite::open(path)?;
@@ -40,7 +36,7 @@ pub fn generate(schema: &DatabaseSchema) -> TokenStream {
         }
 
         $tokens
-    }
+    })
 }
 
 fn migration(part: &SchemaPart) -> Vec<String> {
@@ -170,7 +166,20 @@ fn generate_select(db: &sqltight_core::Sqlite, select: &Select) -> Result<TokenS
     let table_name = return_ty.ident();
     let table_name_str = table_name.to_string();
     let sql = format!("select {table_name_str}.* from {table_name_str} {sql}");
-    let param_names = db.prepare(&sql)?.parameter_names();
+    let stmt = match db.prepare(&sql) {
+        Ok(stmt) => stmt,
+        Err(err) => match err {
+            sqltight_core::Error::Sqlite { text, .. } => {
+                Diagnostic::spanned(fn_name.span(), Level::Error, &text).emit();
+                return Err(Error::Generate {
+                    text,
+                    span: fn_name.span(),
+                });
+            }
+            _ => todo!(),
+        },
+    };
+    let param_names = stmt.parameter_names();
     let param_names = param_names
         .iter()
         .map(|x| x.trim_start_matches(":"))
@@ -236,12 +245,14 @@ fn upsert_sql(table: &Table) -> (String, TokenStream) {
     (sql, params)
 }
 
-pub enum Error {
-    GenerateSelect(sqltight_core::Error),
-}
-
 impl From<sqltight_core::Error> for Error {
     fn from(value: sqltight_core::Error) -> Self {
-        Self::GenerateSelect(value)
+        match value {
+            sqltight_core::Error::Sqlite { text, .. } => Self::Generate {
+                text,
+                span: Span::call_site(),
+            },
+            _ => todo!(),
+        }
     }
 }
