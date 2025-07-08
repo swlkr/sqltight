@@ -31,15 +31,17 @@ db! {
 
   // select statements are named and the return
   // type determines the columns selected
-  select posts Vec<Post> {
+  select user_posts (
+    Vec<Post> 
     "where Post.user_id = :user_id
      order by created_at desc
      limit 2"
-  }
+   )
 
-  select user User {
+  select user (
+    User
     "where User.id = :user_id"
-  }
+  )
 }
 
 fn main() -> Result<()> {

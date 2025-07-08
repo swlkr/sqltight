@@ -3,81 +3,6 @@ pub use sqltight_core::{Error, Result, Sqlite, Stmt, Tx, Value};
 pub use sqltight_macros::db;
 use std::collections::BTreeMap;
 
-pub type Text = Option<String>;
-pub type Int = Option<i64>;
-pub type Blob = Option<Vec<u8>>;
-pub type Real = Option<f64>;
-
-#[allow(non_upper_case_globals)]
-pub const is: &str = "is";
-
-#[allow(non_upper_case_globals)]
-pub const is_not: &str = "is not";
-
-pub fn text(s: impl std::fmt::Display) -> Text {
-    Some(s.to_string())
-}
-
-pub fn int(value: i64) -> Int {
-    Some(value)
-}
-
-pub fn real(value: f64) -> Real {
-    Some(value)
-}
-
-pub fn blob(value: Vec<u8>) -> Blob {
-    Some(value)
-}
-
-pub trait FromRow {
-    fn from_row(row: &BTreeMap<String, Value>) -> Self;
-}
-
-pub trait Crud {
-    fn save(self, db: &Sqlite) -> sqltight::Result<Self>
-    where
-        Self: Sized;
-
-    fn delete(self, db: &Sqlite) -> sqltight::Result<Self>
-    where
-        Self: Sized;
-}
-
-#[allow(unused)]
-pub struct Database(sqltight::Sqlite);
-
-impl Database {
-    pub fn transaction<'a>(&'a self) -> Result<Transaction<'a>> {
-        let tx = self.0.transaction()?;
-        Ok(Transaction(tx))
-    }
-
-    pub fn execute(&self, sql: &str) -> Result<i32> {
-        self.0.execute(sql)
-    }
-
-    pub fn save<T: sqltight::Crud>(&self, row: T) -> Result<T> {
-        row.save(&self.0)
-    }
-
-    pub fn delete<T: sqltight::Crud>(&self, row: T) -> Result<T> {
-        row.delete(&self.0)
-    }
-}
-
-pub struct Transaction<'a>(sqltight_core::Transaction<'a>);
-
-impl<'a> Transaction<'a> {
-    pub fn save<T: sqltight::Crud>(&self, row: T) -> Result<T> {
-        row.save(&self.0)
-    }
-
-    pub fn delete<T: sqltight::Crud>(&self, row: T) -> Result<T> {
-        row.delete(&self.0)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,27 +27,30 @@ mod tests {
             updated_at: Int,
         }
 
-        select posts Vec<Post> {
+        select posts (
+            Vec<Post>
             "where Post.user_id = :user_id
             order by Post.created_at
             limit 2"
-        }
+        )
 
-        select user User {
+        select user (
+            User
             "where User.id = :id"
-        }
+        )
 
-        select get_posts_by_contents Vec<Post> {
+        select get_posts_by_contents (
+            Vec<Post>
             "where Post.content = :content
             or Post.content = :content_1
             order by Post.created_at desc
             limit 2"
-        }
+        )
     }
 
     #[test]
     fn it_works() -> sqltight::Result<()> {
-        let db = db()?;
+        let db = Database::open(":memory:")?;
         let user = db.save(User {
             email: text("email"),
             ..Default::default()
@@ -156,8 +84,7 @@ mod tests {
 
     #[test]
     fn readme() -> sqltight::Result<()> {
-        let db = db()?;
-
+        let db = Database::open(":memory:")?;
         let user = User {
             email: text("email"),
             ..Default::default()
@@ -198,4 +125,77 @@ mod tests {
         assert_eq!(found_user.id, user.id);
         Ok(())
     }
+}
+
+pub type Text = Option<String>;
+pub type Int = Option<i64>;
+pub type Blob = Option<Vec<u8>>;
+pub type Real = Option<f64>;
+
+pub fn text(s: impl std::fmt::Display) -> Text {
+    Some(s.to_string())
+}
+
+pub fn int(value: i64) -> Int {
+    Some(value)
+}
+
+pub fn real(value: f64) -> Real {
+    Some(value)
+}
+
+pub fn blob(value: Vec<u8>) -> Blob {
+    Some(value)
+}
+
+pub trait FromRow {
+    fn from_row(row: &BTreeMap<String, Value>) -> Self;
+}
+
+pub trait Crud {
+    fn save(self, db: &Sqlite) -> sqltight::Result<Self>
+    where
+        Self: Sized;
+
+    fn delete(self, db: &Sqlite) -> sqltight::Result<Self>
+    where
+        Self: Sized;
+}
+
+#[allow(unused)]
+pub struct Database(pub sqltight::Sqlite);
+
+impl Database {
+    pub fn transaction<'a>(&'a self) -> Result<Transaction<'a>> {
+        let tx = self.0.transaction()?;
+        Ok(Transaction(tx))
+    }
+
+    pub fn execute(&self, sql: &str) -> Result<i32> {
+        self.0.execute(sql)
+    }
+
+    pub fn save<T: sqltight::Crud>(&self, row: T) -> Result<T> {
+        row.save(&self.0)
+    }
+
+    pub fn delete<T: sqltight::Crud>(&self, row: T) -> Result<T> {
+        row.delete(&self.0)
+    }
+}
+
+pub struct Transaction<'a>(sqltight_core::Transaction<'a>);
+
+impl<'a> Transaction<'a> {
+    pub fn save<T: sqltight::Crud>(&self, row: T) -> Result<T> {
+        row.save(&self.0)
+    }
+
+    pub fn delete<T: sqltight::Crud>(&self, row: T) -> Result<T> {
+        row.delete(&self.0)
+    }
+}
+
+pub trait Opener {
+    fn open(path: &str) -> Result<Database>;
 }

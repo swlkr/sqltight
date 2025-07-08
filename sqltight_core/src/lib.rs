@@ -52,16 +52,8 @@ impl Sqlite {
         }
     }
 
-    pub fn prepare(&self, sql: &str, params: &[Value]) -> Result<Stmt> {
+    pub fn prepare(&self, sql: &str) -> Result<Stmt> {
         let stmt = Stmt::prepare(self.db, sql, core::ptr::null_mut())?;
-        match params.is_empty() {
-            true => {}
-            false => {
-                for (ix, param) in params.iter().enumerate() {
-                    let _ = stmt.bind(ix, &param)?;
-                }
-            }
-        }
         Ok(stmt)
     }
 
@@ -82,37 +74,25 @@ impl Sqlite {
         }
     }
 
-    pub fn transaction(&self) -> Result<Transaction> {
+    pub fn transaction(&self) -> Result<Transaction<'_>> {
         Transaction::new(self, Tx::Immediate)
     }
 
     pub fn migrate(&self, migrations: &[impl ToString]) -> Result<()> {
         let tx = self.transaction()?;
-        let _result = tx
-            .prepare(
-                "create table if not exists migrations (sql text unique not null) strict",
-                &[],
-            )?
-            .result()?;
+        let _result =
+            tx.execute("create table if not exists migrations (sql text unique not null) strict")?;
         for sql in migrations {
-            let result = tx.prepare(&sql.to_string(), &[]);
-            let stmt = match result {
-                Ok(result) => result,
-                Err(Error::DuplicateColumnName(_)) => return Ok(()),
-                Err(err) => return Err(err),
-            };
-            let result = stmt.result();
+            let result = tx.execute(&sql.to_string());
             let _result = match result {
                 Ok(result) => result,
-                Err(Error::DuplicateColumnName(_)) => 0,
+                Err(Error::DuplicateColumnName(_)) => return Ok(()),
                 Err(err) => return Err(err),
             };
             let _result = tx
             .prepare(
                 "insert into migrations (sql) values (?) on conflict (sql) do update set sql = excluded.sql",
-                &[Value::Text(Some(sql.to_string()))],
-            )?
-            .result()?;
+            )?.bind(&[Value::Text(Some(sql.to_string()))])?.result()?;
         }
 
         Ok(())
@@ -166,44 +146,47 @@ impl Stmt {
         }
     }
 
-    fn bind(&self, ix: usize, param: &Value) -> Result<()> {
-        match param {
-            Value::Text(Some(val)) => unsafe {
-                sqlite3_bind_text(
-                    self.stmt,
-                    (ix + 1) as i32,
-                    val.as_ptr() as *const _,
-                    val.len() as c_int,
-                    None,
-                );
-            },
-            Value::Integer(Some(n)) => unsafe {
-                sqlite3_bind_int64(self.stmt, (ix + 1) as i32, *n);
-            },
-            Value::Real(Some(f)) => unsafe {
-                sqlite3_bind_double(self.stmt, (ix + 1) as i32, *f);
-            },
-            Value::Blob(Some(b)) => {
-                unsafe {
-                    sqlite3_bind_blob(
+    pub fn bind(self, params: &[Value]) -> Result<Self> {
+        params
+            .iter()
+            .enumerate()
+            .for_each(|(ix, param)| match param {
+                Value::Text(Some(val)) => unsafe {
+                    sqlite3_bind_text(
                         self.stmt,
                         (ix + 1) as i32,
-                        b.as_ptr() as *const _,
-                        b.len() as c_int,
+                        val.as_ptr() as *const _,
+                        val.len() as c_int,
                         None,
-                    )
-                };
-            }
-            Value::Text(None)
-            | Value::Integer(None)
-            | Value::Real(None)
-            | Value::Blob(None)
-            | Value::Null => {
-                unsafe { sqlite3_bind_null(self.stmt, (ix + 1) as i32) };
-            }
-        }
+                    );
+                },
+                Value::Integer(Some(n)) => unsafe {
+                    sqlite3_bind_int64(self.stmt, (ix + 1) as i32, *n);
+                },
+                Value::Real(Some(f)) => unsafe {
+                    sqlite3_bind_double(self.stmt, (ix + 1) as i32, *f);
+                },
+                Value::Blob(Some(b)) => {
+                    unsafe {
+                        sqlite3_bind_blob(
+                            self.stmt,
+                            (ix + 1) as i32,
+                            b.as_ptr() as *const _,
+                            b.len() as c_int,
+                            None,
+                        )
+                    };
+                }
+                Value::Text(None)
+                | Value::Integer(None)
+                | Value::Real(None)
+                | Value::Blob(None)
+                | Value::Null => {
+                    unsafe { sqlite3_bind_null(self.stmt, (ix + 1) as i32) };
+                }
+            });
 
-        Ok(())
+        Ok(self)
     }
 
     fn column_count(&self) -> i32 {
@@ -321,11 +304,8 @@ impl<'a> Deref for Transaction<'a> {
 impl<'a> Drop for Transaction<'a> {
     fn drop(&mut self) {
         match self.end() {
-            Ok(result) => {
-                dbg!(result);
-            }
-            Err(err) => {
-                dbg!(err);
+            Ok(_) => {}
+            Err(_err) => {
                 self.rollback().expect("Rollback failed");
             }
         }

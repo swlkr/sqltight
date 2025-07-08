@@ -1,12 +1,38 @@
-mod db;
-use db::{Database, db_macro};
-use proc_macro::TokenStream;
-use syn::parse_macro_input;
+#![feature(proc_macro_quote, proc_macro_totokens)]
+
+mod generator;
+mod parser;
+
+use generator::generate;
+use parser::parse;
+use proc_macro::{TokenStream, quote};
 
 #[proc_macro]
 pub fn db(input: TokenStream) -> TokenStream {
-    let db = parse_macro_input!(input as Database);
-    db_macro(&db)
-        .unwrap_or_else(syn::Error::into_compile_error)
-        .into()
+    match db_macro(input) {
+        Ok(tokens) => tokens,
+        Err(err) => to_compile_error(err),
+    }
+}
+
+fn db_macro(input: TokenStream) -> Result<TokenStream, Error> {
+    let schema = parse(input)?;
+    let tokens = generate(&schema);
+    Ok(tokens)
+}
+
+#[derive(Debug)]
+enum Error {
+    String(String),
+}
+
+impl From<String> for Error {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
+fn to_compile_error(error: Error) -> TokenStream {
+    let err = format!("{:?}", error);
+    quote!(compile_error!($err))
 }
