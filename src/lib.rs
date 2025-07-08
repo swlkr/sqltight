@@ -27,19 +27,16 @@ mod tests {
             updated_at: Int,
         }
 
-        select posts (
+        select find_posts (
             Vec<Post>
             "where Post.user_id = :user_id
-            order by created_at
+            order by created_at desc
             limit 2"
         )
 
-        select user (
-            User
-            "where User.id = :id"
-        )
+        select find_user (User "where id = :id")
 
-        select get_posts_by_contents (
+        select find_posts_by_contents (
             Vec<Post>
             "where Post.content = :content
             or Post.content = :content_1
@@ -73,11 +70,11 @@ mod tests {
         })?;
         assert_eq!(post2.id, int(2));
         assert_eq!(post2.user_id, int(1));
-        let posts = db.posts(user.id)?;
-        let user = db.user(user.id)?;
+        let posts = db.find_posts(user.id)?;
+        let user = db.find_user(user.id)?;
         assert_eq!(posts.len(), 2);
         assert_eq!(user.id, int(1));
-        let posts = db.get_posts_by_contents(text("content"), text("content 2"))?;
+        let posts = db.find_posts_by_contents(text("content"), text("content 2"))?;
         assert_eq!(posts.len(), 2);
         Ok(())
     }
@@ -119,8 +116,8 @@ mod tests {
 
         // queries are defined and prepared into statements
         // ahead of time in the db! macro
-        let posts = db.posts(user.id)?;
-        let found_user = db.user(user.id)?;
+        let posts = db.find_posts(user.id)?;
+        let found_user = db.find_user(user.id)?;
         assert_eq!(posts.len(), 2);
         assert_eq!(found_user.id, user.id);
         Ok(())
@@ -163,24 +160,27 @@ pub trait Crud {
 }
 
 #[allow(unused)]
-pub struct Database(pub sqltight::Sqlite);
+pub struct Database {
+    pub connection: sqltight::Sqlite,
+    pub statements: std::collections::HashMap<&'static str, sqltight::Stmt>,
+}
 
 impl Database {
     pub fn transaction<'a>(&'a self) -> Result<Transaction<'a>> {
-        let tx = self.0.transaction()?;
+        let tx = self.connection.transaction()?;
         Ok(Transaction(tx))
     }
 
     pub fn execute(&self, sql: &str) -> Result<i32> {
-        self.0.execute(sql)
+        self.connection.execute(sql)
     }
 
     pub fn save<T: sqltight::Crud>(&self, row: T) -> Result<T> {
-        row.save(&self.0)
+        row.save(&self.connection)
     }
 
     pub fn delete<T: sqltight::Crud>(&self, row: T) -> Result<T> {
-        row.delete(&self.0)
+        row.delete(&self.connection)
     }
 }
 

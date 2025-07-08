@@ -17,12 +17,17 @@ pub fn generate(schema: &DatabaseSchema) -> Result<TokenStream, Error> {
         .iter()
         .map(|mig| quote! { $mig, })
         .collect::<TokenStream>();
+    let statements = schema
+        .parts
+        .iter()
+        .map(statement_from_part)
+        .collect::<TokenStream>();
 
     Ok(quote! {
         impl sqltight::Opener for sqltight::Database {
             fn open(path: &str) -> sqltight::Result<sqltight::Database> {
-                let conn = sqltight::Sqlite::open(path)?;
-                let _result = conn.execute(
+                let connection = sqltight::Sqlite::open(path)?;
+                let _result = connection.execute(
                     "PRAGMA journal_mode = WAL;
                     PRAGMA busy_timeout = 5000;
                     PRAGMA synchronous = NORMAL;
@@ -30,8 +35,9 @@ pub fn generate(schema: &DatabaseSchema) -> Result<TokenStream, Error> {
                     PRAGMA foreign_keys = true;
                     PRAGMA temp_store = memory;",
                 )?;
-                let _result = conn.migrate(&[$migration_tokens])?;
-                Ok(sqltight::Database(conn))
+                let _result = connection.migrate(&[$migration_tokens])?;
+                let statements: std::collections::HashMap<&'static str, sqltight::Stmt> = vec![$statements].into_iter().collect();
+                Ok(sqltight::Database { connection, statements })
             }
         }
 
@@ -153,19 +159,25 @@ fn generate_table(table: &Table) -> TokenStream {
     }
 }
 
+fn generate_select_sql(select: &Select) -> String {
+    let Select { return_ty, sql, .. } = select;
+    let table_name = return_ty.ident();
+    let table_name_str = table_name.to_string();
+    format!("select {table_name_str}.* from {table_name_str} {sql}")
+}
+
 fn generate_select(db: &sqltight_core::Sqlite, select: &Select) -> Result<TokenStream, Error> {
     let Select {
         fn_name,
         return_ty,
         sql,
     } = select;
+    let sql = generate_select_sql(select);
+    let table_name = return_ty.ident();
     let return_val = match return_ty {
         ReturnTy::Vec(_) => quote!(Ok(rows)),
         ReturnTy::Ident(_) => quote!(rows.into_iter().nth(0).ok_or(sqltight::Error::RowNotFound)),
     };
-    let table_name = return_ty.ident();
-    let table_name_str = table_name.to_string();
-    let sql = format!("select {table_name_str}.* from {table_name_str} {sql}");
     let stmt = match db.prepare(&sql) {
         Ok(stmt) => stmt,
         Err(err) => match err {
@@ -201,11 +213,11 @@ fn generate_select(db: &sqltight_core::Sqlite, select: &Select) -> Result<TokenS
         ReturnTy::Vec(ident) => quote! { Vec<$ident> },
         ReturnTy::Ident(ident) => quote! { $ident },
     };
+    let fn_name_str = fn_name.to_string();
     Ok(quote!(
         impl sqltight::Database {
             pub fn $fn_name(&self, $fn_args) -> sqltight::Result<$return_ty_tokens> {
-                let rows = self.0
-                    .prepare($sql)?
+                let rows = self.statements.get($fn_name_str).unwrap()
                     .bind($params)?
                     .rows()?
                     .iter()
@@ -254,5 +266,21 @@ impl From<sqltight_core::Error> for Error {
             },
             _ => todo!(),
         }
+    }
+}
+
+fn statement_from_part(part: &SchemaPart) -> TokenStream {
+    match part {
+        SchemaPart::Table(table) => TokenStream::new(),
+        SchemaPart::Index(_index) => TokenStream::new(),
+        SchemaPart::Select(select) => statement_from_select(select),
+    }
+}
+
+fn statement_from_select(select: &Select) -> TokenStream {
+    let key = select.fn_name.to_string();
+    let sql = generate_select_sql(select);
+    quote! {
+        ($key, connection.prepare($sql).unwrap()),
     }
 }
