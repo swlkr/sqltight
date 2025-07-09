@@ -2,7 +2,7 @@ use crate::{
     Error,
     parser::{DatabaseSchema, Field, Index, ReturnTy, SchemaPart, Select, Table},
 };
-use proc_macro::{Diagnostic, Ident, Level, Span, TokenStream, quote};
+use proc_macro::{Diagnostic, Ident, Level, TokenStream, quote};
 
 pub fn generate(schema: &DatabaseSchema) -> Result<TokenStream, Error> {
     let db = sqltight_core::Sqlite::open(":memory:").unwrap();
@@ -168,9 +168,7 @@ fn generate_select_sql(select: &Select) -> String {
 
 fn generate_select(db: &sqltight_core::Sqlite, select: &Select) -> Result<TokenStream, Error> {
     let Select {
-        fn_name,
-        return_ty,
-        sql,
+        fn_name, return_ty, ..
     } = select;
     let sql = generate_select_sql(select);
     let table_name = return_ty.ident();
@@ -183,10 +181,7 @@ fn generate_select(db: &sqltight_core::Sqlite, select: &Select) -> Result<TokenS
         Err(err) => match err {
             sqltight_core::Error::Sqlite { text, .. } => {
                 Diagnostic::spanned(fn_name.span(), Level::Error, &text).emit();
-                return Err(Error::Generate {
-                    text,
-                    span: fn_name.span(),
-                });
+                return Err(Error::Generate(text));
             }
             _ => todo!(),
         },
@@ -260,10 +255,7 @@ fn upsert_sql(table: &Table) -> (String, TokenStream) {
 impl From<sqltight_core::Error> for Error {
     fn from(value: sqltight_core::Error) -> Self {
         match value {
-            sqltight_core::Error::Sqlite { text, .. } => Self::Generate {
-                text,
-                span: Span::call_site(),
-            },
+            sqltight_core::Error::Sqlite { text, .. } => Self::Generate(text),
             _ => todo!(),
         }
     }
@@ -271,7 +263,7 @@ impl From<sqltight_core::Error> for Error {
 
 fn statement_from_part(part: &SchemaPart) -> TokenStream {
     match part {
-        SchemaPart::Table(table) => TokenStream::new(),
+        SchemaPart::Table(_table) => TokenStream::new(),
         SchemaPart::Index(_index) => TokenStream::new(),
         SchemaPart::Select(select) => statement_from_select(select),
     }

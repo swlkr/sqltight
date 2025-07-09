@@ -27,16 +27,16 @@ mod tests {
             updated_at: Int,
         }
 
-        select find_posts (
+        select posts_by_user_id (
             Vec<Post>
             "where Post.user_id = :user_id
             order by created_at desc
             limit 2"
         )
 
-        select find_user (User "where id = :id")
+        select user_by_id (User "where id = :id")
 
-        select find_posts_by_contents (
+        select posts_by_contents (
             Vec<Post>
             "where Post.content = :content
             or Post.content = :content_1
@@ -70,11 +70,11 @@ mod tests {
         })?;
         assert_eq!(post2.id, int(2));
         assert_eq!(post2.user_id, int(1));
-        let posts = db.find_posts(user.id)?;
-        let user = db.find_user(user.id)?;
+        let posts = db.posts_by_user_id(user.id)?;
+        let user = db.user_by_id(user.id)?;
         assert_eq!(posts.len(), 2);
         assert_eq!(user.id, int(1));
-        let posts = db.find_posts_by_contents(text("content"), text("content 2"))?;
+        let posts = db.posts_by_contents(text("content"), text("content 2"))?;
         assert_eq!(posts.len(), 2);
         Ok(())
     }
@@ -116,8 +116,8 @@ mod tests {
 
         // queries are defined and prepared into statements
         // ahead of time in the db! macro
-        let posts = db.find_posts(user.id)?;
-        let found_user = db.find_user(user.id)?;
+        let posts = db.posts_by_user_id(user.id)?;
+        let found_user = db.user_by_id(user.id)?;
         assert_eq!(posts.len(), 2);
         assert_eq!(found_user.id, user.id);
         Ok(())

@@ -1,6 +1,6 @@
 # sqltight
 
-Zero dependency sqlite library for rust
+Zero dependency sqlite library for *nightly* rust
 
 # Quickstart
 
@@ -31,14 +31,14 @@ db! {
 
   // select statements are named and the return
   // type determines the columns selected
-  select find_user_posts (
+  select posts_by_user_id (
     Vec<Post>
     "where Post.user_id = :user_id
      order by created_at desc
      limit 2"
    )
 
-  select find_user (
+  select user_by_id (
     User
     "where User.id = :user_id"
   )
@@ -48,7 +48,7 @@ fn main() -> Result<()> {
   let db = db();
 
   // upsert and delete are the only write functions
-  let user = User { email: text("email"), ..Default::default() };
+  let user = User::new("email");
   let user = db.save(user)?;
 
   let user1 = User { email: text("email2"), ..Default::default() };
@@ -68,8 +68,8 @@ fn main() -> Result<()> {
 
   // queries are defined and prepared into statements
   // ahead of time in the db! macro
-  let posts = db.posts(user.id)?;
-  let user = db.user(user.id)?;
+  let posts = db.posts_by_user_id(user.id)?;
+  let user = db.user_by_id(user.id)?;
 
   Ok(())
 }

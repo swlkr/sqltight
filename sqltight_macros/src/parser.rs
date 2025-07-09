@@ -1,4 +1,4 @@
-use proc_macro::{Delimiter, Ident, Span, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Ident, TokenStream, TokenTree};
 use std::iter::Peekable;
 
 use crate::Error;
@@ -54,31 +54,27 @@ impl Parser<proc_macro::token_stream::IntoIter> {
     fn expect_ident(&mut self) -> Result<Ident, Error> {
         match self.tokens.next() {
             Some(TokenTree::Ident(ident)) => Ok(ident),
-            Some(other) => Err(Error::Parse {
-                text: format!("Expected an identifier, but got: {}", other),
-                span: other.span(),
-            }),
-            None => Err(Error::Parse {
-                text: "Expected an identifier, but found end of stream.".to_string(),
-                span: Span::call_site(),
-            }),
+            Some(other) => Err(Error::Parse(format!(
+                "Expected an identifier, but got: {}",
+                other
+            ))),
+            None => Err(Error::Parse(
+                "Expected an identifier, but found end of stream.".to_string(),
+            )),
         }
     }
 
     fn expect_punct(&mut self, expected: char) -> Result<(), Error> {
         match self.tokens.next() {
             Some(TokenTree::Punct(punct)) if punct.as_char() == expected => Ok(()),
-            Some(other) => Err(Error::Parse {
-                text: format!("Expected punctuation '{}', but got: {}", expected, other),
-                span: other.span(),
-            }),
-            None => Err(Error::Parse {
-                text: format!(
-                    "Expected punctuation '{}', but found end of stream.",
-                    expected
-                ),
-                span: Span::call_site(),
-            }),
+            Some(other) => Err(Error::Parse(format!(
+                "Expected punctuation '{}', but got: {}",
+                expected, other
+            ))),
+            None => Err(Error::Parse(format!(
+                "Expected punctuation '{}', but found end of stream.",
+                expected
+            ))),
         }
     }
 
@@ -107,14 +103,12 @@ impl Parser<proc_macro::token_stream::IntoIter> {
                          let sql = lit.to_string().trim_matches('"').to_string();
                          Ok(Select { fn_name, return_ty, sql })
                      },
-                     _ => Err(Error::Parse { text: "Expected a string literal for the SQL query inside the select parentheses.".to_string(), span: fn_name.span()})
+                     _ => Err(Error::Parse("Expected a string literal for the SQL query inside the select parentheses.".to_string()))
                  }
             }
-            _ => Err(Error::Parse {
-                text: "Expected a parenthesized group `(...)` for the select statement."
-                    .to_string(),
-                span: fn_name.span(),
-            }),
+            _ => Err(Error::Parse(
+                "Expected a parenthesized group `(...)` for the select statement.".to_string(),
+            )),
         }
     }
 
@@ -124,10 +118,9 @@ impl Parser<proc_macro::token_stream::IntoIter> {
                 let mut content_parser = Parser::new(group.stream());
                 content_parser.parse_fields()
             }
-            _other => Err(Error::Parse {
-                text: "Expected a braced block `{ ... }`".to_string(),
-                span: Span::call_site(),
-            }),
+            _other => Err(Error::Parse(
+                "Expected a braced block `{ ... }`".to_string(),
+            )),
         }
     }
 
@@ -158,10 +151,7 @@ impl Parser<proc_macro::token_stream::IntoIter> {
                 return Ok(ReturnTy::Ident(ident));
             }
         } else {
-            return Err(Error::Parse {
-                text: "Expected Vec<T> or T".into(),
-                span: Span::call_site(),
-            });
+            return Err(Error::Parse("Expected Vec<T> or T".into()));
         };
 
         if let Some(TokenTree::Punct(punct)) = self.tokens.peek() {
@@ -169,19 +159,13 @@ impl Parser<proc_macro::token_stream::IntoIter> {
                 self.tokens.next();
             }
         } else {
-            return Err(Error::Parse {
-                text: "Expected Vec<T>".into(),
-                span: Span::call_site(),
-            });
+            return Err(Error::Parse("Expected Vec<T>".into()));
         };
 
         let return_ty = if let Some(TokenTree::Ident(ident)) = self.tokens.next() {
             ReturnTy::Vec(ident.clone())
         } else {
-            return Err(Error::Parse {
-                text: "Expected Vec<T>".into(),
-                span: Span::call_site(),
-            });
+            return Err(Error::Parse("Expected Vec<T>".into()));
         };
 
         self.tokens.next(); // get that last >
@@ -200,13 +184,10 @@ pub fn parse(input: TokenStream) -> Result<DatabaseSchema, Error> {
             "index" => parts.push(SchemaPart::Index(parser.parse_index()?)),
             "select" => parts.push(SchemaPart::Select(parser.parse_select()?)),
             _ => {
-                return Err(Error::Parse {
-                    text: format!(
-                        "Unexpected keyword: {}. Expected 'table', 'index', or 'select'.",
-                        keyword
-                    ),
-                    span: keyword.span(),
-                });
+                return Err(Error::Parse(format!(
+                    "Unexpected keyword: {}. Expected 'table', 'index', or 'select'.",
+                    keyword
+                )));
             }
         }
     }

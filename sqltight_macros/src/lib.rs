@@ -5,7 +5,7 @@ mod parser;
 
 use generator::generate;
 use parser::parse;
-use proc_macro::{Span, TokenStream, quote};
+use proc_macro::{TokenStream, quote};
 
 #[proc_macro]
 pub fn db(input: TokenStream) -> TokenStream {
@@ -22,21 +22,22 @@ fn db_macro(input: TokenStream) -> Result<TokenStream, Error> {
 }
 
 enum Error {
-    Generate { text: String, span: Span },
-    Parse { text: String, span: Span },
+    Generate(String),
+    Parse(String),
 }
 
 impl Error {
     pub fn msg(&self) -> &str {
         match self {
-            Error::Generate { text, .. } => text,
-            Error::Parse { text, .. } => text,
+            Error::Generate(text) => text,
+            Error::Parse(text) => text,
         }
     }
 }
 
 fn to_compile_error(err: Error) -> TokenStream {
+    let err = err.msg();
     quote! {
-        compile_error!("Failed to build macro")
+        compile_error!($err)
     }
 }
