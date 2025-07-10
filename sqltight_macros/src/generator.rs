@@ -316,11 +316,11 @@ fn generate_select_struct(
         .map(|(name, ty)| {
             let name = Ident::new(name, fn_name.span());
             let ty = match ty.as_str() {
-                "INTEGER" => "Int",
+                "INTEGER" | "INT" => "Int",
                 "TEXT" => "Text",
                 "BLOB" => "Blob",
                 "REAL" => "Real",
-                _ => "BLOB",
+                _ => "Blob",
             };
             let ty = Ident::new(ty, fn_name.span());
             quote! { pub $name: $ty, }

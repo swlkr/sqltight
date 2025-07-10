@@ -422,3 +422,15 @@ impl From<&Value> for Option<String> {
         }
     }
 }
+
+impl From<&Value> for Option<Vec<u8>> {
+    fn from(value: &Value) -> Self {
+        match value {
+            Value::Text(_val) => todo!(),
+            Value::Integer(_) => todo!(),
+            Value::Real(_) => todo!(),
+            Value::Blob(items) => items.clone(),
+            Value::Null => None,
+        }
+    }
+}

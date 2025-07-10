@@ -38,11 +38,11 @@ mod tests {
         query user_by_id "select user.id from user where id = :id limit 1"
 
         query posts_by_contents "
-            select post.id
+            select id, content, user_id, created_at
             from post
-            where post.content = :content
-            or post.content = :content_1
-            order by Post.created_at desc
+            where content = :content
+            or content = :content_1
+            order by created_at desc
             limit 2
         "
     }
