@@ -30,18 +30,20 @@ db! {
   }
 
   // select statements are named and the return
-  // type determines the columns selected
-  select posts_by_user_id (
-    Vec<Post>
-    "where Post.user_id = :user_id
-     order by created_at desc
-     limit 2"
-   )
+  // type is created from the fn name at compile time
+  query posts_by_user_id "
+    select id
+    from post
+    where user_id = :user_id
+    order by created_at desc
+    limit 2
+  "
 
-  select user_by_id (
-    User
-    "where User.id = :user_id"
-  )
+  query user_by_id "
+    select id, email, created_at
+    from user
+    where id = :user_id
+  "
 }
 
 fn main() -> Result<()> {

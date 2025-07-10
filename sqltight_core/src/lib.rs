@@ -2,9 +2,10 @@ use sqltight_ffi::{
     SQLITE_DONE, SQLITE_OK, SQLITE_ROW, sqlite3, sqlite3_bind_blob, sqlite3_bind_double,
     sqlite3_bind_int64, sqlite3_bind_null, sqlite3_bind_parameter_count,
     sqlite3_bind_parameter_name, sqlite3_bind_text, sqlite3_changes, sqlite3_close,
-    sqlite3_column_bytes, sqlite3_column_count, sqlite3_column_double, sqlite3_column_int64,
-    sqlite3_column_name, sqlite3_column_text, sqlite3_column_type, sqlite3_errmsg, sqlite3_exec,
-    sqlite3_finalize, sqlite3_open, sqlite3_prepare_v2, sqlite3_step, sqlite3_stmt,
+    sqlite3_column_bytes, sqlite3_column_count, sqlite3_column_decltype, sqlite3_column_double,
+    sqlite3_column_int64, sqlite3_column_name, sqlite3_column_text, sqlite3_column_type,
+    sqlite3_errmsg, sqlite3_exec, sqlite3_finalize, sqlite3_open, sqlite3_prepare_v2, sqlite3_step,
+    sqlite3_stmt,
 };
 
 use std::{
@@ -37,9 +38,6 @@ type Row = BTreeMap<String, Value>;
 pub struct Sqlite {
     db: *mut sqlite3,
 }
-
-unsafe impl Send for Sqlite {}
-unsafe impl Sync for Sqlite {}
 
 impl Sqlite {
     pub fn open(path: &str) -> Result<Self> {
@@ -86,13 +84,14 @@ impl Sqlite {
             let result = tx.execute(&sql.to_string());
             let _result = match result {
                 Ok(result) => result,
-                Err(Error::DuplicateColumnName(_)) => return Ok(()),
+                Err(Error::DuplicateColumnName(_)) => 0,
                 Err(err) => return Err(err),
             };
+            let text = Value::Text(Some(sql.to_string()));
             let _result = tx
-            .prepare(
-                "insert into migrations (sql) values (?) on conflict (sql) do update set sql = excluded.sql",
-            )?.bind(&[Value::Text(Some(sql.to_string()))])?.result()?;
+                .prepare("insert into migrations (sql) values (:sql) on conflict (sql) do update set sql = excluded.sql")?
+                .bind(&[text])?
+                .changes()?;
         }
 
         Ok(())
@@ -239,7 +238,7 @@ impl Stmt {
         Ok(rows)
     }
 
-    pub fn result(&self) -> Result<i32> {
+    pub fn changes(&self) -> Result<i32> {
         while let Ok(result) = self.step()
             && (result != SQLITE_ROW || result != SQLITE_DONE)
         {}
@@ -257,6 +256,28 @@ impl Stmt {
             names.push(name);
         }
         names
+    }
+
+    pub fn select_column_names(&self) -> Vec<String> {
+        let mut names = vec![];
+        let column_count = unsafe { sqlite3_column_count(self.stmt) };
+        for i in 0..column_count {
+            let name = unsafe { CStr::from_ptr(sqlite3_column_name(self.stmt, i)) };
+            let name = name.to_string_lossy().to_string();
+            names.push(name);
+        }
+        names
+    }
+
+    pub fn select_column_types(&self) -> Vec<String> {
+        let mut types = vec![];
+        let column_count = unsafe { sqlite3_column_count(self.stmt) };
+        for i in 0..column_count {
+            let datatype = unsafe { CStr::from_ptr(sqlite3_column_decltype(self.stmt, i)) };
+            let datatype = datatype.to_string_lossy().into_owned();
+            types.push(datatype);
+        }
+        types
     }
 }
 
@@ -397,7 +418,7 @@ impl From<&Value> for Option<String> {
             Value::Integer(_) => todo!(),
             Value::Real(_) => todo!(),
             Value::Blob(_items) => todo!(),
-            Value::Null => todo!(),
+            Value::Null => None,
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
     Error,
-    parser::{DatabaseSchema, Field, Index, ReturnTy, SchemaPart, Select, Table},
+    parser::{DatabaseSchema, Field, Index, Query, SchemaPart, Table},
 };
 use proc_macro::{Diagnostic, Ident, Level, Span, TokenStream, quote};
 
@@ -14,16 +14,25 @@ pub fn generate(schema: &DatabaseSchema) -> Result<TokenStream, Error> {
         .filter_map(|part| match part {
             SchemaPart::Table(table) => Some(generate_table(table)),
             SchemaPart::Index(_index) => None,
-            SchemaPart::Select(_select) => None,
+            SchemaPart::Query(_select) => None,
         })
-        .collect::<TokenStream>();
+        .collect::<Result<TokenStream, Error>>()?;
     let select_tokens = schema
         .parts
         .iter()
         .filter_map(|part| match part {
             SchemaPart::Table(_table) => None,
             SchemaPart::Index(_index) => None,
-            SchemaPart::Select(select) => Some(generate_select(&db, select)),
+            SchemaPart::Query(select) => Some(generate_select(&db, select)),
+        })
+        .collect::<Result<TokenStream, Error>>()?;
+    let select_struct_tokens = schema
+        .parts
+        .iter()
+        .filter_map(|part| match part {
+            SchemaPart::Table(_table) => None,
+            SchemaPart::Index(_index) => None,
+            SchemaPart::Query(select) => Some(generate_select_struct(&db, select)),
         })
         .collect::<Result<TokenStream, Error>>()?;
     let migration_tokens = migrations
@@ -87,6 +96,7 @@ pub fn generate(schema: &DatabaseSchema) -> Result<TokenStream, Error> {
         }
 
         $table_tokens
+        $select_struct_tokens
     })
 }
 
@@ -94,7 +104,7 @@ fn migration(part: &SchemaPart) -> Vec<String> {
     match part {
         SchemaPart::Table(table) => table_migrations(table),
         SchemaPart::Index(index) => index_migrations(index),
-        SchemaPart::Select(_select) => vec![],
+        SchemaPart::Query(_select) => vec![],
     }
 }
 
@@ -133,7 +143,7 @@ fn index_migrations(index: &Index) -> Vec<String> {
         .collect()
 }
 
-fn generate_table(table: &Table) -> TokenStream {
+fn generate_table(table: &Table) -> Result<TokenStream, Error> {
     let name = &table.name;
     let fields = table
         .fields
@@ -151,11 +161,27 @@ fn generate_table(table: &Table) -> TokenStream {
             quote!($field_name: match row.get($key) { Some(val) => val.into(), None => None },)
         })
         .collect::<TokenStream>();
+    let id = match table
+        .fields
+        .iter()
+        .find(|field| field.name.to_string() == "id")
+        .map(|field| &field.name)
+    {
+        Some(id) => id,
+        None => {
+            Diagnostic::spanned(
+                table.name.span(),
+                Level::Error,
+                "Missing required column: id",
+            )
+            .emit();
+            return Err(Error::Generate("Missing required column: id".to_string()));
+        }
+    };
 
-    quote! {
+    Ok(quote! {
         #[derive(Default)]
         pub struct $name {
-            id: sqltight::Int,
             $fields
         }
         impl sqltight::Crud for $name {
@@ -173,7 +199,7 @@ fn generate_table(table: &Table) -> TokenStream {
 
             fn delete(self, db: &sqltight::Sqlite) -> sqltight::Result<Self> {
                 let sql = $delete_sql;
-                let params = vec![sqltight::Value::Integer(self.id)];
+                let params = vec![sqltight::Value::Integer(self.$id)];
                 let row = db
                     .prepare(&sql)?
                     .bind(&params)?
@@ -188,30 +214,36 @@ fn generate_table(table: &Table) -> TokenStream {
         impl sqltight::FromRow for $name {
             fn from_row(row: &std::collections::BTreeMap<String, sqltight::Value>) -> Self {
                 Self {
-                    id: row.get("id").unwrap().into(),
                     $from_row_fields
                 }
             }
         }
-    }
+    })
 }
 
-fn generate_select_sql(select: &Select) -> String {
-    let Select { return_ty, sql, .. } = select;
-    let table_name = return_ty.ident();
-    let table_name_str = table_name.to_string();
-    format!("select {table_name_str}.* from {table_name_str} {sql}")
+fn pascal_case(name: &str) -> String {
+    name.split("_")
+        .map(|x| {
+            format!(
+                "{}{}",
+                x.chars().nth(0).unwrap().to_uppercase(),
+                x.chars().skip(1).collect::<String>()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("")
 }
 
-fn generate_select(db: &sqltight_core::Sqlite, select: &Select) -> Result<TokenStream, Error> {
-    let Select {
-        fn_name, return_ty, ..
-    } = select;
-    let sql = generate_select_sql(select);
-    let table_name = return_ty.ident();
-    let return_val = match return_ty {
-        ReturnTy::Vec(_) => quote!(Ok(rows)),
-        ReturnTy::Ident(_) => quote!(rows.into_iter().nth(0).ok_or(sqltight::Error::RowNotFound)),
+fn generate_select(db: &sqltight_core::Sqlite, select: &Query) -> Result<TokenStream, Error> {
+    let sql = &select.sql;
+    let fn_name = &select.fn_name;
+    let return_ident = Ident::new(&pascal_case(&fn_name.to_string()), fn_name.span());
+    let (return_ty, return_val) = match sql.contains("limit 1") {
+        false => (quote!(Vec<$return_ident>), quote!(Ok(rows))),
+        true => (
+            quote!($return_ident),
+            quote!(rows.into_iter().nth(0).ok_or(sqltight::Error::RowNotFound)),
+        ),
     };
     let stmt = match db.prepare(&sql) {
         Ok(stmt) => stmt,
@@ -241,20 +273,78 @@ fn generate_select(db: &sqltight_core::Sqlite, select: &Select) -> Result<TokenS
         .map(|arg| quote!($arg.into(),))
         .collect::<TokenStream>();
     let params = quote!(&[$params]);
-    let return_ty_tokens = match return_ty {
-        ReturnTy::Vec(ident) => quote! { Vec<$ident> },
-        ReturnTy::Ident(ident) => quote! { $ident },
-    };
     let fn_name_str = fn_name.to_string();
     Ok(quote!(
-        pub fn $fn_name(&self, $fn_args) -> sqltight::Result<$return_ty_tokens> {
+        #[doc = $sql]
+        pub fn $fn_name(&self, $fn_args) -> sqltight::Result<$return_ty> {
             let rows = self.statements.get($fn_name_str).unwrap()
                 .bind($params)?
                 .rows()?
                 .iter()
-                .map($table_name::from_row)
-                .collect::<Vec<$table_name>>();
+                .map($return_ident::from_row)
+                .collect::<Vec<$return_ident>>();
             $return_val
+        }
+    ))
+}
+
+fn generate_select_struct(
+    db: &sqltight_core::Sqlite,
+    select: &Query,
+) -> Result<TokenStream, Error> {
+    let sql = &select.sql;
+    let fn_name = &select.fn_name;
+    let struct_ident = Ident::new(&pascal_case(&fn_name.to_string()), fn_name.span());
+    let stmt = match db.prepare(&sql) {
+        Ok(stmt) => stmt,
+        Err(err) => match err {
+            sqltight_core::Error::Sqlite { text, .. } => {
+                Diagnostic::spanned(fn_name.span(), Level::Error, &text).emit();
+                return Err(Error::Generate(text));
+            }
+            _ => todo!(),
+        },
+    };
+    let column_names = stmt.select_column_names();
+    let column_types = stmt.select_column_types();
+    let columns = column_names
+        .into_iter()
+        .zip(column_types)
+        .collect::<Vec<_>>();
+    let fields = columns
+        .iter()
+        .map(|(name, ty)| {
+            let name = Ident::new(name, fn_name.span());
+            let ty = match ty.as_str() {
+                "INTEGER" => "Int",
+                "TEXT" => "Text",
+                "BLOB" => "Blob",
+                "REAL" => "Real",
+                _ => "BLOB",
+            };
+            let ty = Ident::new(ty, fn_name.span());
+            quote! { pub $name: $ty, }
+        })
+        .collect::<TokenStream>();
+    let from_row_fields = columns
+        .iter()
+        .map(|(name, ..)| {
+            let ident = Ident::new(name, fn_name.span());
+            quote!($ident: match row.get($name) { Some(val) => val.into(), None => None },)
+        })
+        .collect::<TokenStream>();
+
+    Ok(quote!(
+        pub struct $struct_ident {
+            $fields
+        }
+
+        impl sqltight::FromRow for $struct_ident {
+            fn from_row(row: &std::collections::BTreeMap<String, sqltight::Value>) -> Self {
+                Self {
+                    $from_row_fields
+                }
+            }
         }
     ))
 }
@@ -300,14 +390,14 @@ fn statement_from_part(part: &SchemaPart) -> TokenStream {
     match part {
         SchemaPart::Table(_table) => TokenStream::new(),
         SchemaPart::Index(_index) => TokenStream::new(),
-        SchemaPart::Select(select) => statement_from_select(select),
+        SchemaPart::Query(select) => statement_from_select(select),
     }
 }
 
-fn statement_from_select(select: &Select) -> TokenStream {
+fn statement_from_select(select: &Query) -> TokenStream {
     let key = select.fn_name.to_string();
-    let sql = generate_select_sql(select);
+    let sql = &select.sql;
     quote! {
-        ($key, connection.prepare($sql).unwrap()),
+        ($key, connection.prepare($sql)?),
     }
 }

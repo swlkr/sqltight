@@ -27,22 +27,24 @@ mod tests {
             updated_at: Int,
         }
 
-        select posts_by_user_id (
-            Vec<Post>
-            "where Post.user_id = :user_id
-            order by created_at desc
-            limit 2"
-        )
+        query posts_by_user_id "
+            select post.id
+            from post
+            where post.user_id = :user_id
+            order by post.created_at desc
+            limit 2
+        "
 
-        select user_by_id (User "where id = :id")
+        query user_by_id "select user.id from user where id = :id limit 1"
 
-        select posts_by_contents (
-            Vec<Post>
-            "where Post.content = :content
-            or Post.content = :content_1
+        query posts_by_contents "
+            select post.id
+            from post
+            where post.content = :content
+            or post.content = :content_1
             order by Post.created_at desc
-            limit 2"
-        )
+            limit 2
+        "
     }
 
     #[test]

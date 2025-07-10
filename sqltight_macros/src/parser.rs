@@ -22,9 +22,8 @@ pub struct Index {
 }
 
 #[derive(Debug)]
-pub struct Select {
+pub struct Query {
     pub fn_name: Ident,
-    pub return_ty: ReturnTy,
     pub sql: String,
 }
 
@@ -32,7 +31,7 @@ pub struct Select {
 pub enum SchemaPart {
     Table(Table),
     Index(Index),
-    Select(Select),
+    Query(Query),
 }
 
 #[derive(Debug)]
@@ -90,24 +89,16 @@ impl Parser<proc_macro::token_stream::IntoIter> {
         Ok(Index { name, fields })
     }
 
-    fn parse_select(&mut self) -> Result<Select, Error> {
+    fn parse_query(&mut self) -> Result<Query, Error> {
         let fn_name = self.expect_ident()?;
-
         match self.tokens.next() {
-            Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Parenthesis => {
-                let mut content_parser = Parser::new(group.stream());
-                let return_ty = content_parser.parse_return_ty()?;
-                let next_token = content_parser.tokens.next();
-                match next_token {
-                     Some(TokenTree::Literal(lit)) => {
-                         let sql = lit.to_string().trim_matches('"').to_string();
-                         Ok(Select { fn_name, return_ty, sql })
-                     },
-                     _ => Err(Error::Parse("Expected a string literal for the SQL query inside the select parentheses.".to_string()))
-                 }
+            Some(TokenTree::Literal(lit)) => {
+                let sql = lit.to_string().trim_matches('"').to_string();
+                Ok(Query { fn_name, sql })
             }
             _ => Err(Error::Parse(
-                "Expected a parenthesized group `(...)` for the select statement.".to_string(),
+                "Expected a string literal for the SQL query inside the select parentheses."
+                    .to_string(),
             )),
         }
     }
@@ -144,34 +135,6 @@ impl Parser<proc_macro::token_stream::IntoIter> {
         }
         Ok(fields)
     }
-
-    fn parse_return_ty(&mut self) -> Result<ReturnTy, Error> {
-        if let Some(TokenTree::Ident(ident)) = self.tokens.next() {
-            if ident.to_string() != "Vec" {
-                return Ok(ReturnTy::Ident(ident));
-            }
-        } else {
-            return Err(Error::Parse("Expected Vec<T> or T".into()));
-        };
-
-        if let Some(TokenTree::Punct(punct)) = self.tokens.peek() {
-            if punct.as_char() == '<' {
-                self.tokens.next();
-            }
-        } else {
-            return Err(Error::Parse("Expected Vec<T>".into()));
-        };
-
-        let return_ty = if let Some(TokenTree::Ident(ident)) = self.tokens.next() {
-            ReturnTy::Vec(ident.clone())
-        } else {
-            return Err(Error::Parse("Expected Vec<T>".into()));
-        };
-
-        self.tokens.next(); // get that last >
-
-        Ok(return_ty)
-    }
 }
 
 pub fn parse(input: TokenStream) -> Result<DatabaseSchema, Error> {
@@ -182,29 +145,14 @@ pub fn parse(input: TokenStream) -> Result<DatabaseSchema, Error> {
         match keyword.to_string().as_str() {
             "table" => parts.push(SchemaPart::Table(parser.parse_table()?)),
             "index" => parts.push(SchemaPart::Index(parser.parse_index()?)),
-            "select" => parts.push(SchemaPart::Select(parser.parse_select()?)),
+            "query" => parts.push(SchemaPart::Query(parser.parse_query()?)),
             _ => {
                 return Err(Error::Parse(format!(
-                    "Unexpected keyword: {}. Expected 'table', 'index', or 'select'.",
+                    "Unexpected keyword: {}. Expected 'table', 'index', or 'query'.",
                     keyword
                 )));
             }
         }
     }
     Ok(DatabaseSchema { parts })
-}
-
-#[derive(Debug)]
-pub enum ReturnTy {
-    Vec(Ident),
-    Ident(Ident),
-}
-
-impl ReturnTy {
-    pub fn ident(&self) -> &Ident {
-        match self {
-            ReturnTy::Vec(ident) => ident,
-            ReturnTy::Ident(ident) => ident,
-        }
-    }
 }
