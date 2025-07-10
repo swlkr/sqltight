@@ -314,18 +314,26 @@ fn generate_select_struct(
     let fields = columns
         .iter()
         .map(|(name, ty)| {
+            if name.contains("(") {
+                let err = format!("{name} needs an alias. I don't make the rules");
+                Diagnostic::spanned(fn_name.span(), Level::Error, &err).emit();
+                return Err(Error::Generate(err));
+            }
             let name = Ident::new(name, fn_name.span());
             let ty = match ty.as_str() {
                 "INTEGER" | "INT" => "Int",
                 "TEXT" => "Text",
                 "BLOB" => "Blob",
                 "REAL" => "Real",
-                _ => "Blob",
+                _ => match name.to_string().contains("count") {
+                    true => "Int",
+                    false => "Blob",
+                },
             };
             let ty = Ident::new(ty, fn_name.span());
-            quote! { pub $name: $ty, }
+            Ok(quote! { pub $name: $ty, })
         })
-        .collect::<TokenStream>();
+        .collect::<Result<TokenStream, Error>>()?;
     let from_row_fields = columns
         .iter()
         .map(|(name, ..)| {
@@ -335,6 +343,7 @@ fn generate_select_struct(
         .collect::<TokenStream>();
 
     Ok(quote!(
+        #[derive(Debug, Clone, PartialEq)]
         pub struct $struct_ident {
             $fields
         }

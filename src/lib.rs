@@ -45,6 +45,14 @@ mod tests {
             order by created_at desc
             limit 2
         "
+
+        query count_posts_by_user "
+            select count(post.id) as post_count, user.id, user.email
+            from post
+            join user on user.id = post.user_id
+            group by post.user_id
+            order by post_count desc
+        "
     }
 
     #[test]
@@ -78,6 +86,10 @@ mod tests {
         assert_eq!(user.id, int(1));
         let posts = db.posts_by_contents(text("content"), text("content 2"))?;
         assert_eq!(posts.len(), 2);
+        let counts = db.count_posts_by_user()?;
+        assert_eq!(counts.len(), 1);
+        assert_eq!(counts.first().unwrap().post_count, int(2));
+        assert_eq!(counts.first().unwrap().id, user.id);
         Ok(())
     }
 

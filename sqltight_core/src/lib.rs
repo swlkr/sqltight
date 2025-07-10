@@ -273,8 +273,14 @@ impl Stmt {
         let mut types = vec![];
         let column_count = unsafe { sqlite3_column_count(self.stmt) };
         for i in 0..column_count {
-            let datatype = unsafe { CStr::from_ptr(sqlite3_column_decltype(self.stmt, i)) };
-            let datatype = datatype.to_string_lossy().into_owned();
+            let datatype = unsafe {
+                let value = sqlite3_column_decltype(self.stmt, i);
+                match value.is_null() {
+                    true => CStr::from_bytes_with_nul(b"ANY\0").unwrap(),
+                    false => CStr::from_ptr(value),
+                }
+            };
+            let datatype = datatype.to_string_lossy().to_string();
             types.push(datatype);
         }
         types
