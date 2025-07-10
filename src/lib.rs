@@ -159,32 +159,7 @@ pub trait Crud {
         Self: Sized;
 }
 
-#[allow(unused)]
-pub struct Database {
-    pub connection: sqltight::Sqlite,
-    pub statements: std::collections::HashMap<&'static str, sqltight::Stmt>,
-}
-
-impl Database {
-    pub fn transaction<'a>(&'a self) -> Result<Transaction<'a>> {
-        let tx = self.connection.transaction()?;
-        Ok(Transaction(tx))
-    }
-
-    pub fn execute(&self, sql: &str) -> Result<i32> {
-        self.connection.execute(sql)
-    }
-
-    pub fn save<T: sqltight::Crud>(&self, row: T) -> Result<T> {
-        row.save(&self.connection)
-    }
-
-    pub fn delete<T: sqltight::Crud>(&self, row: T) -> Result<T> {
-        row.delete(&self.connection)
-    }
-}
-
-pub struct Transaction<'a>(sqltight_core::Transaction<'a>);
+pub struct Transaction<'a>(pub sqltight_core::Transaction<'a>);
 
 impl<'a> Transaction<'a> {
     pub fn save<T: sqltight::Crud>(&self, row: T) -> Result<T> {
@@ -194,8 +169,4 @@ impl<'a> Transaction<'a> {
     pub fn delete<T: sqltight::Crud>(&self, row: T) -> Result<T> {
         row.delete(&self.0)
     }
-}
-
-pub trait Opener {
-    fn open(path: &str) -> Result<Database>;
 }

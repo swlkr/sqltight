@@ -2,16 +2,29 @@ use crate::{
     Error,
     parser::{DatabaseSchema, Field, Index, ReturnTy, SchemaPart, Select, Table},
 };
-use proc_macro::{Diagnostic, Ident, Level, TokenStream, quote};
+use proc_macro::{Diagnostic, Ident, Level, Span, TokenStream, quote};
 
 pub fn generate(schema: &DatabaseSchema) -> Result<TokenStream, Error> {
     let db = sqltight_core::Sqlite::open(":memory:").unwrap();
     let migrations = schema.parts.iter().flat_map(migration).collect::<Vec<_>>();
     let _result = db.migrate(&migrations)?;
-    let tokens = schema
+    let table_tokens = schema
         .parts
         .iter()
-        .map(|part| generate_part(&db, part))
+        .filter_map(|part| match part {
+            SchemaPart::Table(table) => Some(generate_table(table)),
+            SchemaPart::Index(_index) => None,
+            SchemaPart::Select(_select) => None,
+        })
+        .collect::<TokenStream>();
+    let select_tokens = schema
+        .parts
+        .iter()
+        .filter_map(|part| match part {
+            SchemaPart::Table(_table) => None,
+            SchemaPart::Index(_index) => None,
+            SchemaPart::Select(select) => Some(generate_select(&db, select)),
+        })
         .collect::<Result<TokenStream, Error>>()?;
     let migration_tokens = migrations
         .iter()
@@ -22,10 +35,40 @@ pub fn generate(schema: &DatabaseSchema) -> Result<TokenStream, Error> {
         .iter()
         .map(statement_from_part)
         .collect::<TokenStream>();
+    // HACK: call_site spans for each ident
+    let database = Ident::new("Database", Span::call_site());
+    let open_fn = Ident::new("open", Span::call_site());
+    let transaction = Ident::new("transaction", Span::call_site());
+    let execute = Ident::new("execute", Span::call_site());
+    let save = Ident::new("save", Span::call_site());
+    let delete = Ident::new("delete", Span::call_site());
 
     Ok(quote! {
-        impl sqltight::Opener for sqltight::Database {
-            fn open(path: &str) -> sqltight::Result<sqltight::Database> {
+        #[allow(unused)]
+        pub struct $database {
+            pub connection: sqltight::Sqlite,
+            pub statements: std::collections::HashMap<&'static str, sqltight::Stmt>,
+        }
+
+        impl $database {
+            pub fn $transaction<'a>(&'a self) -> sqltight::Result<sqltight::Transaction<'a>> {
+                let tx = self.connection.transaction()?;
+                Ok(sqltight::Transaction(tx))
+            }
+
+            pub fn $execute(&self, sql: &str) -> sqltight::Result<i32> {
+                self.connection.execute(sql)
+            }
+
+            pub fn $save<T: sqltight::Crud>(&self, row: T) -> sqltight::Result<T> {
+                row.save(&self.connection)
+            }
+
+            pub fn $delete<T: sqltight::Crud>(&self, row: T) -> sqltight::Result<T> {
+                row.delete(&self.connection)
+            }
+
+            pub fn $open_fn(path: &str) -> sqltight::Result<Self> {
                 let connection = sqltight::Sqlite::open(path)?;
                 let _result = connection.execute(
                     "PRAGMA journal_mode = WAL;
@@ -37,11 +80,13 @@ pub fn generate(schema: &DatabaseSchema) -> Result<TokenStream, Error> {
                 )?;
                 let _result = connection.migrate(&[$migration_tokens])?;
                 let statements: std::collections::HashMap<&'static str, sqltight::Stmt> = vec![$statements].into_iter().collect();
-                Ok(sqltight::Database { connection, statements })
+                Ok(Self { connection, statements })
             }
+
+            $select_tokens
         }
 
-        $tokens
+        $table_tokens
     })
 }
 
@@ -86,14 +131,6 @@ fn index_migrations(index: &Index) -> Vec<String> {
             )
         })
         .collect()
-}
-
-fn generate_part(db: &sqltight_core::Sqlite, part: &SchemaPart) -> Result<TokenStream, Error> {
-    match part {
-        SchemaPart::Table(table) => Ok(generate_table(table)),
-        SchemaPart::Index(_index) => Ok(TokenStream::new()),
-        SchemaPart::Select(select) => generate_select(db, select),
-    }
 }
 
 fn generate_table(table: &Table) -> TokenStream {
@@ -210,16 +247,14 @@ fn generate_select(db: &sqltight_core::Sqlite, select: &Select) -> Result<TokenS
     };
     let fn_name_str = fn_name.to_string();
     Ok(quote!(
-        impl sqltight::Database {
-            pub fn $fn_name(&self, $fn_args) -> sqltight::Result<$return_ty_tokens> {
-                let rows = self.statements.get($fn_name_str).unwrap()
-                    .bind($params)?
-                    .rows()?
-                    .iter()
-                    .map($table_name::from_row)
-                    .collect::<Vec<$table_name>>();
-                $return_val
-            }
+        pub fn $fn_name(&self, $fn_args) -> sqltight::Result<$return_ty_tokens> {
+            let rows = self.statements.get($fn_name_str).unwrap()
+                .bind($params)?
+                .rows()?
+                .iter()
+                .map($table_name::from_row)
+                .collect::<Vec<$table_name>>();
+            $return_val
         }
     ))
 }
