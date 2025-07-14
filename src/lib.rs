@@ -1,7 +1,9 @@
 extern crate self as sqltight;
-pub use sqltight_core::{Error, Result, Sqlite, Stmt, Tx, Value};
+pub use sqltight_core::{
+    Blob, Crud, Error, FromRow, Int, Real, Result, Sqlite, Stmt, Text, Tx, Value, blob, int, real,
+    text,
+};
 pub use sqltight_macros::db;
-use std::collections::BTreeMap;
 
 #[cfg(test)]
 mod tests {
@@ -136,41 +138,6 @@ mod tests {
         assert_eq!(found_user.id, user.id);
         Ok(())
     }
-}
-
-pub type Text = Option<String>;
-pub type Int = Option<i64>;
-pub type Blob = Option<Vec<u8>>;
-pub type Real = Option<f64>;
-
-pub fn text(s: impl std::fmt::Display) -> Text {
-    Some(s.to_string())
-}
-
-pub fn int(value: i64) -> Int {
-    Some(value)
-}
-
-pub fn real(value: f64) -> Real {
-    Some(value)
-}
-
-pub fn blob(value: Vec<u8>) -> Blob {
-    Some(value)
-}
-
-pub trait FromRow {
-    fn from_row(row: &BTreeMap<String, Value>) -> Self;
-}
-
-pub trait Crud {
-    fn save(self, db: &Sqlite) -> sqltight::Result<Self>
-    where
-        Self: Sized;
-
-    fn delete(self, db: &Sqlite) -> sqltight::Result<Self>
-    where
-        Self: Sized;
 }
 
 pub struct Transaction<'a>(pub sqltight_core::Transaction<'a>);

@@ -158,7 +158,7 @@ fn generate_table(table: &Table) -> Result<TokenStream, Error> {
         .map(|field| {
             let field_name = &field.name;
             let key = field.name.to_string();
-            quote!($field_name: match row.get($key) { Some(val) => val.into(), None => None },)
+            quote!($field_name: match row.get($key) { Some(val) => val.clone().into(), None => None.into() },)
         })
         .collect::<TokenStream>();
     let id = match table
@@ -199,7 +199,7 @@ fn generate_table(table: &Table) -> Result<TokenStream, Error> {
 
             fn delete(self, db: &sqltight::Sqlite) -> sqltight::Result<Self> {
                 let sql = $delete_sql;
-                let params = vec![sqltight::Value::Integer(self.$id)];
+                let params = vec![self.$id.into()];
                 let row = db
                     .prepare(&sql)?
                     .bind(&params)?
@@ -338,7 +338,7 @@ fn generate_select_struct(
         .iter()
         .map(|(name, ..)| {
             let ident = Ident::new(name, fn_name.span());
-            quote!($ident: match row.get($name) { Some(val) => val.into(), None => None },)
+            quote!($ident: match row.get($name) { Some(val) => val.clone().into(), None => None.into() },)
         })
         .collect::<TokenStream>();
 

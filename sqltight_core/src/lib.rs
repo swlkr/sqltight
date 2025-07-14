@@ -87,7 +87,7 @@ impl Sqlite {
                 Err(Error::DuplicateColumnName(_)) => 0,
                 Err(err) => return Err(err),
             };
-            let text = Value::Text(Some(sql.to_string()));
+            let text = Value::Text(sql.to_string().into());
             let _result = tx
                 .prepare("insert into migrations (sql) values (:sql) on conflict (sql) do update set sql = excluded.sql")?
                 .bind(&[text])?
@@ -150,7 +150,7 @@ impl Stmt {
             .iter()
             .enumerate()
             .for_each(|(ix, param)| match param {
-                Value::Text(Some(val)) => unsafe {
+                Value::Text(Text(Some(val))) => unsafe {
                     sqlite3_bind_text(
                         self.stmt,
                         (ix + 1) as i32,
@@ -159,13 +159,13 @@ impl Stmt {
                         None,
                     );
                 },
-                Value::Integer(Some(n)) => unsafe {
+                Value::Int(Int(Some(n))) => unsafe {
                     sqlite3_bind_int64(self.stmt, (ix + 1) as i32, *n);
                 },
-                Value::Real(Some(f)) => unsafe {
+                Value::Real(Real(Some(f))) => unsafe {
                     sqlite3_bind_double(self.stmt, (ix + 1) as i32, *f);
                 },
-                Value::Blob(Some(b)) => {
+                Value::Blob(Blob(Some(b))) => {
                     unsafe {
                         sqlite3_bind_blob(
                             self.stmt,
@@ -176,10 +176,10 @@ impl Stmt {
                         )
                     };
                 }
-                Value::Text(None)
-                | Value::Integer(None)
-                | Value::Real(None)
-                | Value::Blob(None)
+                Value::Text(Text(None))
+                | Value::Int(Int(None))
+                | Value::Real(Real(None))
+                | Value::Blob(Blob(None))
                 | Value::Null => {
                     unsafe { sqlite3_bind_null(self.stmt, (ix + 1) as i32) };
                 }
@@ -200,13 +200,13 @@ impl Stmt {
     fn column_value(&self, i: i32) -> Value {
         let result = unsafe { sqlite3_column_type(self.stmt, i) };
         match result {
-            1 => Value::Integer(Some(unsafe { sqlite3_column_int64(self.stmt, i) })),
-            2 => Value::Real(Some(unsafe { sqlite3_column_double(self.stmt, i) })),
+            1 => Value::Int(Int(Some(unsafe { sqlite3_column_int64(self.stmt, i) }))),
+            2 => Value::Real(Real(Some(unsafe { sqlite3_column_double(self.stmt, i) }))),
             3 => {
                 let result =
                     unsafe { CStr::from_ptr(sqlite3_column_text(self.stmt, i) as *const c_char) };
                 let text = result.to_string_lossy().into_owned();
-                Value::Text(Some(text))
+                Value::Text(Text(Some(text)))
             }
             4 => {
                 let slice = unsafe {
@@ -214,7 +214,7 @@ impl Stmt {
                     let ptr = sqlite3_column_text(self.stmt, i);
                     std::slice::from_raw_parts(ptr, len)
                 };
-                Value::Blob(Some(slice.to_vec()))
+                Value::Blob(Blob(Some(slice.to_vec())))
             }
             _ => Value::Null,
         }
@@ -366,77 +366,184 @@ impl From<NulError> for Error {
     }
 }
 
+#[derive(Default, Clone, Debug, PartialEq)]
+pub struct Text(Option<String>);
+
+#[derive(Default, Clone, Copy, Debug, PartialEq)]
+pub struct Int(Option<i64>);
+
+#[derive(Default, Clone, Copy, Debug, PartialEq)]
+pub struct Real(Option<f64>);
+
+#[derive(Default, Clone, Debug, PartialEq)]
+pub struct Blob(Option<Vec<u8>>);
+
+pub fn text(s: impl std::fmt::Display) -> Text {
+    s.to_string().into()
+}
+
+pub fn int(value: i64) -> Int {
+    value.into()
+}
+
+pub fn real(value: f64) -> Real {
+    value.into()
+}
+
+pub fn blob(value: Vec<u8>) -> Blob {
+    value.into()
+}
+
+impl From<Option<String>> for Text {
+    fn from(value: Option<String>) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Option<i64>> for Int {
+    fn from(value: Option<i64>) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Option<f64>> for Real {
+    fn from(value: Option<f64>) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Option<Vec<u8>>> for Blob {
+    fn from(value: Option<Vec<u8>>) -> Self {
+        Self(value)
+    }
+}
+
+impl From<String> for Text {
+    fn from(value: String) -> Self {
+        Self(Some(value))
+    }
+}
+
+impl From<i64> for Int {
+    fn from(value: i64) -> Self {
+        Self(Some(value))
+    }
+}
+
+impl From<f64> for Real {
+    fn from(value: f64) -> Self {
+        Self(Some(value))
+    }
+}
+
+impl From<Vec<u8>> for Blob {
+    fn from(value: Vec<u8>) -> Self {
+        Self(Some(value))
+    }
+}
+
+impl std::fmt::Display for Text {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            Some(value) => write!(f, "{}", value),
+            None => write!(f, ""),
+        }
+    }
+}
+
+impl std::fmt::Display for Int {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            Some(value) => write!(f, "{}", value),
+            None => write!(f, ""),
+        }
+    }
+}
+
+impl std::fmt::Display for Real {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            Some(value) => write!(f, "{}", value),
+            None => write!(f, ""),
+        }
+    }
+}
 #[derive(Debug, Clone)]
 pub enum Value {
-    Text(Option<String>),
-    Integer(Option<i64>),
-    Real(Option<f64>),
-    Blob(Option<Vec<u8>>),
+    Text(Text),
+    Int(Int),
+    Real(Real),
+    Blob(Blob),
     Null,
 }
 
-impl From<Option<String>> for Value {
-    fn from(value: Option<String>) -> Self {
-        Self::Text(value)
+impl From<Int> for Value {
+    fn from(value: Int) -> Self {
+        Value::Int(value)
+    }
+}
+impl From<Real> for Value {
+    fn from(value: Real) -> Self {
+        Value::Real(value)
+    }
+}
+impl From<Text> for Value {
+    fn from(value: Text) -> Self {
+        Value::Text(value)
+    }
+}
+impl From<Blob> for Value {
+    fn from(value: Blob) -> Self {
+        Value::Blob(value)
     }
 }
 
-impl From<&str> for Value {
-    fn from(value: &str) -> Self {
-        Self::Text(Some(value.to_string()))
-    }
-}
-
-impl From<Option<i64>> for Value {
-    fn from(value: Option<i64>) -> Self {
-        Self::Integer(value)
-    }
-}
-
-impl From<Option<Vec<u8>>> for Value {
-    fn from(value: Option<Vec<u8>>) -> Self {
-        Self::Blob(value)
-    }
-}
-
-impl From<Option<f64>> for Value {
-    fn from(value: Option<f64>) -> Self {
-        Self::Real(value)
-    }
-}
-
-impl From<&Value> for Option<i64> {
-    fn from(value: &Value) -> Self {
+impl From<Value> for Text {
+    fn from(value: Value) -> Self {
         match value {
-            Value::Text(_) => todo!(),
-            Value::Integer(val) => val.clone(),
-            Value::Real(_) => todo!(),
-            Value::Blob(_items) => todo!(),
-            Value::Null => None,
+            Value::Text(text) => text,
+            Value::Null => Text(None),
+            _ => unreachable!(),
         }
     }
 }
-
-impl From<&Value> for Option<String> {
-    fn from(value: &Value) -> Self {
+impl From<Value> for Real {
+    fn from(value: Value) -> Self {
         match value {
-            Value::Text(val) => val.clone(),
-            Value::Integer(_) => todo!(),
-            Value::Real(_) => todo!(),
-            Value::Blob(_items) => todo!(),
-            Value::Null => None,
+            Value::Real(value) => value,
+            Value::Null => Real(None),
+            _ => unreachable!(),
         }
     }
 }
-
-impl From<&Value> for Option<Vec<u8>> {
-    fn from(value: &Value) -> Self {
+impl From<Value> for Blob {
+    fn from(value: Value) -> Self {
         match value {
-            Value::Text(_val) => todo!(),
-            Value::Integer(_) => todo!(),
-            Value::Real(_) => todo!(),
-            Value::Blob(items) => items.clone(),
-            Value::Null => None,
+            Value::Blob(value) => value,
+            Value::Null => Blob(None),
+            _ => unreachable!(),
         }
     }
+}
+impl From<Value> for Int {
+    fn from(value: Value) -> Self {
+        match value {
+            Value::Int(value) => value,
+            Value::Null => Int(None),
+            _ => unreachable!(),
+        }
+    }
+}
+pub trait FromRow {
+    fn from_row(row: &BTreeMap<String, Value>) -> Self;
+}
+
+pub trait Crud {
+    fn save(self, db: &Sqlite) -> Result<Self>
+    where
+        Self: Sized;
+
+    fn delete(self, db: &Sqlite) -> Result<Self>
+    where
+        Self: Sized;
 }
