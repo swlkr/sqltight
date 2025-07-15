@@ -424,6 +424,12 @@ impl From<String> for Text {
     }
 }
 
+impl From<&str> for Text {
+    fn from(value: &str) -> Self {
+        Self(Some(value.into()))
+    }
+}
+
 impl From<i64> for Int {
     fn from(value: i64) -> Self {
         Self(Some(value))
@@ -534,6 +540,13 @@ impl From<Value> for Int {
         }
     }
 }
+
+impl From<&str> for Value {
+    fn from(value: &str) -> Self {
+        Value::Text(value.to_string().into())
+    }
+}
+
 pub trait FromRow {
     fn from_row(row: &BTreeMap<String, Value>) -> Self;
 }

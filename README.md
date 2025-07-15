@@ -50,19 +50,20 @@ fn main() -> Result<()> {
   let db = Database::open(":memory:")?;
 
   // upsert (save) and delete are the only write functions
-  let user = User { email: text("email"), ..Default::default() };
+  let user = User::new("email");
   let user = db.save(user)?;
 
-  let user1 = User { email: text("email2"), ..Default::default() };
+  let user1 = User::new("email1");
   let mut user1 = db.save(user1)?;
 
   // sqlite types are explicit there is no implicit mapping between them
-  user1.email = text("email3");
+  user1.email = text("email2");
+
   let user1 = db.save(user1)?;
   let user1 = db.delete(user1)?;
 
-  let post = Post { content: text("content"), user_id: user.id, ..Default::default() };
-  let post1 = Post { content: text("content1"), user_id: user.id, ..Default::default() };
+  let post = Post::new(user.id, "content");
+  let post1 = Post::new(user.id, "content1");
   {
     let tx = db.transaction()?;
     let post = tx.save(post)?;

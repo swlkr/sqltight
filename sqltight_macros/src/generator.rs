@@ -178,11 +178,44 @@ fn generate_table(table: &Table) -> Result<TokenStream, Error> {
             return Err(Error::Generate("Missing required column: id".to_string()));
         }
     };
+    let new_fields = table
+        .fields
+        .iter()
+        .filter(|field| {
+            field.name.to_string() != "id"
+                && field.name.to_string() != "created_at"
+                && field.name.to_string() != "updated_at"
+        })
+        .collect::<Vec<&Field>>();
+    let new_args = new_fields
+        .iter()
+        .map(
+            |Field {
+                 name: field_name,
+                 ty,
+             }| {
+                quote! { $field_name: impl Into<$ty>, }
+            },
+        )
+        .collect::<TokenStream>();
+
+    let new_struct_fields = new_fields
+        .iter()
+        .map(|Field { name, .. }| {
+            quote! { $name: $name.into(), }
+        })
+        .collect::<TokenStream>();
+    let new_fn = Ident::new("new", name.span());
 
     Ok(quote! {
         #[derive(Default)]
         pub struct $name {
             $fields
+        }
+        impl $name {
+            pub fn $new_fn($new_args) -> Self {
+                Self { $new_struct_fields ..Default::default() }
+            }
         }
         impl sqltight::Crud for $name {
             fn save(self, db: &sqltight::Sqlite) -> sqltight::Result<Self> {

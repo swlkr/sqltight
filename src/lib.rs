@@ -14,7 +14,7 @@ mod tests {
             id: Int,
             email: Text,
             created_at: Int,
-            updated_at: Int,
+            updated_at: Int
         }
 
         index User {
@@ -60,33 +60,23 @@ mod tests {
     #[test]
     fn it_works() -> sqltight::Result<()> {
         let db = Database::open(":memory:")?;
-        let user = db.save(User {
-            email: text("email"),
-            ..Default::default()
-        })?;
+        let user = User::new("email");
+        let user = db.save(user)?;
         assert_eq!(user.id, int(1));
         assert_eq!(user.email, text("email"));
-        let mut post = db.save(Post {
-            content: text("content"),
-            user_id: user.id,
-            ..Default::default()
-        })?;
+        let mut post = db.save(Post::new(user.id, "content"))?;
         assert_eq!(post.id, int(1));
         post.content = text("content 2");
         let post = db.save(post)?;
         assert_eq!(post.content, text("content 2"));
-        let post2 = db.save(Post {
-            content: text("content"),
-            user_id: int(1),
-            ..Default::default()
-        })?;
+        let post2 = db.save(Post::new(user.id, "content"))?;
         assert_eq!(post2.id, int(2));
         assert_eq!(post2.user_id, int(1));
         let posts = db.posts_by_user_id(user.id)?;
         let user = db.user_by_id(user.id)?;
         assert_eq!(posts.len(), 2);
         assert_eq!(user.id, int(1));
-        let posts = db.posts_by_contents(text("content"), text("content 2"))?;
+        let posts = db.posts_by_contents("content", "content 2")?;
         assert_eq!(posts.len(), 2);
         let counts = db.count_posts_by_user()?;
         assert_eq!(counts.len(), 1);
@@ -98,32 +88,21 @@ mod tests {
     #[test]
     fn readme() -> sqltight::Result<()> {
         let db = Database::open(":memory:")?;
-        let user = User {
-            email: text("email"),
-            ..Default::default()
-        };
+        let user = User::new("email");
         let user = db.save(user)?;
 
-        let user1 = User {
-            email: text("email2"),
-            ..Default::default()
-        };
+        let user1 = User::new("email2");
         let mut user1 = db.save(user1)?;
+
         // sqlite types are explicit there is no implicit mapping between them
         user1.email = text("email3");
+
         let user1 = db.save(user1)?;
         let _user1 = db.delete(user1)?;
 
-        let post = Post {
-            content: text("content"),
-            user_id: user.id,
-            ..Default::default()
-        };
-        let post1 = Post {
-            content: text("content1"),
-            user_id: user.id,
-            ..Default::default()
-        };
+        let post = Post::new(user.id, "content");
+        let post1 = Post::new(user.id, "content1");
+
         {
             let tx = db.transaction()?;
             let _post = tx.save(post)?;
@@ -131,7 +110,7 @@ mod tests {
         }
 
         // queries are defined and prepared into statements
-        // ahead of time in the db! macro
+        // at startup in the db! macro
         let posts = db.posts_by_user_id(user.id)?;
         let found_user = db.user_by_id(user.id)?;
         assert_eq!(posts.len(), 2);
