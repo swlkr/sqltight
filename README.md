@@ -84,5 +84,24 @@ fn main() -> Result<()> {
 cargo add --git https://github.com/swlkr/sqltight
 ```
 
+# Tree Sitter Injection for SQL syntax highlighting
+
+```scm
+((macro_invocation
+   macro:
+     [
+       (scoped_identifier
+         name: (_) @_macro_name)
+       (identifier) @_macro_name
+     ]
+   (token_tree
+     (identifier)
+     (string_literal
+       (string_content) @injection.content)))
+ (#eq? @_macro_name "db")
+ (#set! injection.language "sql")
+ (#set! injection.include-children))
+```
+
 Happy hacking!
 

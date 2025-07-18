@@ -54,6 +54,7 @@ mod tests {
             join user on user.id = post.user_id
             group by post.user_id
             order by post_count desc
+            limit 1
         "
     }
 
@@ -78,10 +79,9 @@ mod tests {
         assert_eq!(user.id, int(1));
         let posts = db.posts_by_contents("content", "content 2")?;
         assert_eq!(posts.len(), 2);
-        let counts = db.count_posts_by_user()?;
-        assert_eq!(counts.len(), 1);
-        assert_eq!(counts.first().unwrap().post_count, int(2));
-        assert_eq!(counts.first().unwrap().id, user.id);
+        let row = db.count_posts_by_user()?;
+        assert_eq!(row.post_count, int(2));
+        assert_eq!(row.id, user.id);
         Ok(())
     }
 
