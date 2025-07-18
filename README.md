@@ -56,7 +56,6 @@ fn main() -> Result<()> {
   let user1 = User::new("email1");
   let mut user1 = db.save(user1)?;
 
-  // sqlite types are explicit there is no implicit mapping between them
   user1.email = text("email2");
 
   let user1 = db.save(user1)?;
